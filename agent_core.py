@@ -36,6 +36,7 @@ class WebLLM(Runnable):
                 repo_id=model_name,
                 huggingfacehub_api_token=api_key,
                 task="text-generation",
+                temperature=0,  # 固定温度，保证相同问题回答稳定
             )
             self.llm = ChatHuggingFace(llm=endpoint, verbose=True)
         else:  # OpenAI 兼容（OpenAI / DeepSeek / Moonshot / 通义千问等）

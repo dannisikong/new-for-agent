@@ -14,7 +14,7 @@ import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 from agent_core import make_llm, build_react_graph
-from agentic_rag import build_rag_graph
+from agentic_rag import rag_query
 
 st.set_page_config(page_title="Alfred · LangGraph Agent", page_icon="🎩", layout="wide")
 
@@ -89,13 +89,13 @@ if prompt:
         # 2. 按回答模式运行
         with st.spinner("Alfred 正在思考并调用工具…"):
             if answer_mode == "📚 知识库智能问答（Agentic RAG）":
-                rag_graph = build_rag_graph(None if provider == "演示模式（无需 Token）" else llm)
-                result = rag_graph.invoke({
-                    "question": prompt, "retrieved": [], "grade": "",
-                    "answer": "", "rewrites": 0, "trace": [],
-                })
+                # 带缓存：相同问题直接复用上次结果，不重新检索（回答也保持一致）
+                rag_model = None if provider == "演示模式（无需 Token）" else llm
+                result = rag_query(prompt, model=rag_model)
                 answer = result["answer"]
                 trace = result.get("trace", [])
+                if result.get("cached"):
+                    st.caption("⚡ 命中查询缓存：相同问题直接复用上次答案，未重新检索")
             else:
                 graph = build_react_graph(llm)
                 msgs = [SystemMessage(content=SYSTEM_PROMPT)]

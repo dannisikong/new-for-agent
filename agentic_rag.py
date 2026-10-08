@@ -23,6 +23,30 @@ from knowledge_retriever import _get_index
 MAX_REWRITES = 2
 TOP_K = 3
 
+# 查询缓存：规范化问题 → {answer, trace, hits}
+# 相同问题直接复用上次检索结果，避免重复检索（无状态图 → 带记忆）
+_answer_cache: dict[str, dict] = {}
+
+
+def _norm_question(question: str) -> str:
+    return re.sub(r"\s+", "", question).strip().lower()
+
+
+def _cache_hit(question: str) -> dict | None:
+    key = _norm_question(question)
+    return _answer_cache.get(key)
+
+
+def _cache_store(question: str, answer: str, trace: list):
+    _answer_cache[_norm_question(question)] = {
+        "answer": answer, "trace": trace, "hits": 1,
+    }
+
+
+def cache_stats() -> dict:
+    return {"cached_questions": len(_answer_cache)}
+
+
 # 知识库话题触发词（演示模式：决定是否进入检索）
 KB_WORDS = [
     "知识库", "课程", "学习笔记", "什么是", "是什么", "怎么理解", "讲解", "解释", "区别",
@@ -226,11 +250,36 @@ def build_rag_graph(model=None):
 
 
 # ============================================================
+# 带缓存的统一查询入口（供 Web / 命令行使用）
+# ============================================================
+
+def rag_query(question: str, model=None, use_cache: bool = True) -> dict:
+    """知识库智能问答统一入口：
+    - 命中缓存（相同规范化问题）→ 直接复用上次答案与轨迹，不重新检索
+    - 未命中 → 跑完整 RAG 闭环并写入缓存
+    返回 {answer, trace, cached}。
+    """
+    if use_cache:
+        hit = _cache_hit(question)
+        if hit is not None:
+            return {
+                "answer": hit["answer"],
+                "trace": ["⚡ 缓存命中：相同问题直接复用上次结果，未重新检索"] + list(hit["trace"]),
+                "cached": True,
+            }
+    out = build_rag_graph(model).invoke({
+        "question": question, "retrieved": [], "grade": "",
+        "answer": "", "rewrites": 0, "trace": [],
+    })
+    _cache_store(question, out["answer"], out["trace"])
+    return {"answer": out["answer"], "trace": out["trace"], "cached": False}
+
+
+# ============================================================
 # 独立使用入口（命令行演示）
 # ============================================================
 
 if __name__ == "__main__":
-    rag = build_rag_graph()
     test_queries = [
         "什么是 ReAct？",                       # 相关，直接回答
         "LangGraph 的 State 怎么定义？",          # 相关，直接回答
@@ -239,8 +288,14 @@ if __name__ == "__main__":
     ]
     for q in test_queries:
         print(f"\n{'='*60}\n问题：{q}\n{'='*60}")
-        out = rag.invoke({"question": q, "retrieved": [], "grade": "", "answer": "",
-                          "rewrites": 0, "trace": []})
+        out = rag_query(q)
         for t in out.get("trace", []):
             print("  " + t)
         print("\n" + (out.get("answer") or "")[:400])
+
+    # 缓存验证：同一问题再问一次 → 应命中缓存
+    print(f"\n{'='*60}\n缓存验证：重复提问「什么是 ReAct？」\n{'='*60}")
+    out = rag_query("什么是 ReAct？")
+    print("cached:", out["cached"])
+    print("  " + out["trace"][0])
+    print("cache_stats:", cache_stats())
