@@ -2,6 +2,7 @@
 app_web.py —— Alfred 舞会智能体 · Web 界面（Streamlit）
 ========================================================
 侧边栏可自定义：
+  - 回答模式：标准智能体（ReAct）/ 知识库智能问答（Agentic RAG）
   - 模型提供商（OpenAI 兼容 / Hugging Face / 演示模式）
   - API Token（仅本次会话内存中使用，不落盘、不写入仓库）
   - 模型名称与 Base URL
@@ -13,6 +14,7 @@ import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 from agent_core import make_llm, build_react_graph
+from agentic_rag import build_rag_graph
 
 st.set_page_config(page_title="Alfred · LangGraph Agent", page_icon="🎩", layout="wide")
 
@@ -29,6 +31,12 @@ SYSTEM_PROMPT = (
 # ---------------- 侧边栏配置 ----------------
 with st.sidebar:
     st.header("⚙️ 智能体配置")
+    answer_mode = st.selectbox(
+        "回答模式",
+        ["🌐 标准智能体（ReAct）", "📚 知识库智能问答（Agentic RAG）"],
+        index=0,
+        help="知识库智能问答走「检索→评分→不相关重写→再检索」闭环，适合问 AI Agent 课程知识点",
+    )
     provider = st.selectbox(
         "模型提供商",
         ["演示模式（无需 Token）", "OpenAI 兼容", "Hugging Face"],
@@ -55,7 +63,7 @@ with st.sidebar:
 
 # ---------------- 主区：聊天界面 ----------------
 st.title("🎩 Alfred — 舞会智能体")
-st.caption("LangGraph ReAct 智能体：知识库检索 / 宾客检索 / 网络搜索 / 天气 / HF 模型统计")
+st.caption("LangGraph：标准 ReAct 智能体 / Agentic RAG 知识库智能问答（检索→评分→重写闭环）")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -64,7 +72,7 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-prompt = st.chat_input("问 Alfred 一个问题… 例如：Tell me about Dr. Nikola Tesla")
+prompt = st.chat_input("问 Alfred 一个问题… 例如：什么是 ReAct？/ Tell me about Dr. Nikola Tesla")
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -77,35 +85,45 @@ if prompt:
             raise ValueError("请先在左侧填写 API Token（或改用演示模式）")
 
         llm = make_llm(provider, api_key, model_name, base_url)
-        graph = build_react_graph(llm)
 
-        # 2. 把会话历史组装成消息列表交给图
-        msgs = [SystemMessage(content=SYSTEM_PROMPT)]
-        for m in st.session_state.messages:
-            if m["role"] == "user":
-                msgs.append(HumanMessage(content=m["content"]))
-            else:
-                msgs.append(AIMessage(content=m["content"]))
-
-        # 3. 运行 ReAct 循环
+        # 2. 按回答模式运行
         with st.spinner("Alfred 正在思考并调用工具…"):
-            result = graph.invoke({"messages": msgs})
+            if answer_mode == "📚 知识库智能问答（Agentic RAG）":
+                rag_graph = build_rag_graph(None if provider == "演示模式（无需 Token）" else llm)
+                result = rag_graph.invoke({
+                    "question": prompt, "retrieved": [], "grade": "",
+                    "answer": "", "rewrites": 0, "trace": [],
+                })
+                answer = result["answer"]
+                trace = result.get("trace", [])
+            else:
+                graph = build_react_graph(llm)
+                msgs = [SystemMessage(content=SYSTEM_PROMPT)]
+                for m in st.session_state.messages:
+                    if m["role"] == "user":
+                        msgs.append(HumanMessage(content=m["content"]))
+                    else:
+                        msgs.append(AIMessage(content=m["content"]))
+                result = graph.invoke({"messages": msgs})
+                answer = result["messages"][-1].content
+                # 标准模式的工具调用轨迹
+                trace = []
+                for m in result["messages"]:
+                    if getattr(m, "tool_calls", None):
+                        for tc in m.tool_calls:
+                            trace.append(f"✏️ 思考→行动：调用 {tc['name']}({tc['args']})")
+                    elif getattr(m, "type", "") == "tool":
+                        trace.append(f"📊 观察：{m.name} 返回 {m.content[:100]}{'…' if len(m.content) > 100 else ''}")
 
-        answer = result["messages"][-1].content
         st.session_state.messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
 
-        # 4. 展开显示工具调用轨迹
-        trace = []
-        for m in result["messages"]:
-            if getattr(m, "tool_calls", None):
-                for tc in m.tool_calls:
-                    trace.append(f"✏️ 思考→行动：调用 {tc['name']}({tc['args']})")
-            elif getattr(m, "type", "") == "tool":
-                trace.append(f"📊 观察：{m.name} 返回 {m.content[:100]}{'…' if len(m.content) > 100 else ''}")
+        # 3. 展开显示轨迹（标准模式 TAO / RAG 模式 检索→评分→重写）
         if trace:
-            with st.expander("查看工具调用轨迹（Thought-Action-Observation）"):
+            label = "查看 Agentic RAG 轨迹（检索→评分→重写→回答）" if answer_mode.startswith("📚") \
+                else "查看工具调用轨迹（Thought-Action-Observation）"
+            with st.expander(label):
                 for line in trace:
                     st.code(line)
 

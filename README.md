@@ -10,6 +10,7 @@ LangGraph 学习与实践项目：Alfred 智能体系列。基于 Hugging Face A
 | `alfred_hitl.py` | 带 Human-in-the-Loop 的邮件分拣：interrupt / Command(resume) / checkpointer |
 | `retriever.py` | 宾客数据集与关键词检索（模拟 BM25，可替换为 BM25Retriever） |
 | `knowledge_retriever.py` | **AI Agent 课程知识库检索（BM25 中文版）**：加载 `docs/*.md` → jieba 分词 → BM25 索引，提供 `knowledge_search` 检索函数 |
+| `agentic_rag.py` | **Agentic RAG 闭环（知识库智能问答）**：检索 → 评分 → 不相关重写 → 再检索（上限 2 轮）→ 回答；演示模式规则评分，真实模式 LLM 评分/重写 |
 | `tools.py` | 五个工具：知识库检索、宾客检索、网络搜索、天气、HF Hub 模型统计（真实 API 优先，失败自动降级） |
 | `docs/` | 飞书知识库「AI Agent 学习知识库」22 篇课程笔记的 Markdown 快照（检索数据源） |
 | `app.py` | 舞会智能体：ReAct 循环图（assistant ↔ tools），四场景实测 |
@@ -28,6 +29,9 @@ python3 app.py
 # 知识库检索自测（BM25 中文检索）
 python3 knowledge_retriever.py
 
+# Agentic RAG 闭环自测（检索→评分→重写→回答）
+python3 agentic_rag.py
+
 # 邮件分拣（两种分支）
 python3 alfred_mail_agent.py
 
@@ -40,7 +44,10 @@ python3 react_agent_one_liner.py
 
 ## Web 界面（可选）
 
-带图形界面的聊天应用，侧边栏可自定义模型提供商、API Token、模型名与 Base URL（支持 OpenAI / DeepSeek / Moonshot / 通义千问等 OpenAI 兼容接口，及 Hugging Face Inference API）。智能体除舞会工具外，内置 **AI Agent 课程知识库检索**（`docs/` 下 22 篇笔记，BM25 关键词版），可直接问"什么是 ReAct？""LangGraph 的 State 是什么？"等知识问题。
+带图形界面的聊天应用，侧边栏可自定义**回答模式**与模型提供商、API Token、模型名与 Base URL（支持 OpenAI / DeepSeek / Moonshot / 通义千问等 OpenAI 兼容接口，及 Hugging Face Inference API）。两种模式：
+
+1. **🌐 标准智能体（ReAct）**：五工具（知识库 / 宾客 / 网络 / 天气 / HF 统计）多步循环，适合综合任务。
+2. **📚 知识库智能问答（Agentic RAG）**：把官方教程的"检索 → 评分 → 不相关重写 → 再检索 → 回答"闭环移植到 AI Agent 课程知识库——首轮 BM25 召回，评分节点判断相关度，不相关则重写问题重新检索（最多 2 轮），回答标注来源文档。演示模式用规则评分，填 Token 后自动切真实 LLM 评分/重写。
 
 ```bash
 streamlit run app_web.py
@@ -61,6 +68,7 @@ Token 仅在会话内存中使用，不写入代码或仓库。
 
 - **LangGraph 核心构件**：State / Nodes / Edges / 条件分支 / END
 - **ReAct 循环**：`assistant` 节点决定调用哪个工具，`tools_condition` 分岔，`tools → assistant` 回边构成多步循环
+- **Agentic RAG 闭环**：`decide → retrieve → grade →（相关）answer /（不相关）rewrite → retrieve`；评分用问题实词覆盖率（演示）或 LLM 结构化输出（真实），重写保留名词并聚焦文档主题词
 - **Human-in-the-Loop**：`interrupt(payload)` 暂停图 → 外部读取 `__interrupt__` → `Command(resume=决策)` 恢复；需配置 checkpointer
 - **模型兼容**：自定义模型需继承 `Runnable` 并实现 `invoke`，才能用于 `create_react_agent`
 
