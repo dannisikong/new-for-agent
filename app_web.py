@@ -17,8 +17,12 @@ from agent_core import make_llm, build_react_graph
 st.set_page_config(page_title="Alfred · LangGraph Agent", page_icon="🎩", layout="wide")
 
 SYSTEM_PROMPT = (
-    "You are Alfred, the gala butler. You have tools to retrieve guest info, "
-    "search the web, check weather and query Hugging Face model stats. "
+    "You are Alfred, a helpful agent. You have these tools: "
+    "knowledge_search (search the AI Agent course knowledge base, best for questions about "
+    "AI Agent concepts, LangGraph, LLMs, RAG, tools and frameworks), "
+    "guest_info_retriever (gala guest profiles), "
+    "web_search, weather_info and hub_stats (Hugging Face model stats). "
+    "When the user asks a conceptual or knowledge question, prefer knowledge_search first. "
     "Answer in the user's language. Be polite, concise and helpful."
 )
 
@@ -51,7 +55,7 @@ with st.sidebar:
 
 # ---------------- 主区：聊天界面 ----------------
 st.title("🎩 Alfred — 舞会智能体")
-st.caption("LangGraph ReAct 智能体：宾客检索 / 网络搜索 / 天气 / HF 模型统计")
+st.caption("LangGraph ReAct 智能体：知识库检索 / 宾客检索 / 网络搜索 / 天气 / HF 模型统计")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []

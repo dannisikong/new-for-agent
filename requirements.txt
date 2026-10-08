@@ -5,3 +5,4 @@ langchain-huggingface
 ddgs
 huggingface_hub
 streamlit>=1.60
+jieba>=0.42

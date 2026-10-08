@@ -9,7 +9,9 @@ LangGraph 学习与实践项目：Alfred 智能体系列。基于 Hugging Face A
 | `alfred_mail_agent.py` | 邮件分拣智能体：5 节点图 + 条件分支（垃圾/正常两路径） |
 | `alfred_hitl.py` | 带 Human-in-the-Loop 的邮件分拣：interrupt / Command(resume) / checkpointer |
 | `retriever.py` | 宾客数据集与关键词检索（模拟 BM25，可替换为 BM25Retriever） |
-| `tools.py` | 四个工具：宾客检索、网络搜索、天气、HF Hub 模型统计（真实 API 优先，失败自动降级） |
+| `knowledge_retriever.py` | **AI Agent 课程知识库检索（BM25 中文版）**：加载 `docs/*.md` → jieba 分词 → BM25 索引，提供 `knowledge_search` 检索函数 |
+| `tools.py` | 五个工具：知识库检索、宾客检索、网络搜索、天气、HF Hub 模型统计（真实 API 优先，失败自动降级） |
+| `docs/` | 飞书知识库「AI Agent 学习知识库」22 篇课程笔记的 Markdown 快照（检索数据源） |
 | `app.py` | 舞会智能体：ReAct 循环图（assistant ↔ tools），四场景实测 |
 | `react_agent_one_liner.py` | create_react_agent 一行版对比 |
 | `agent_core.py` | 可复用后端核心：参数化 ReAct 图 + 真实 LLM 工厂（Web UI 使用） |
@@ -20,8 +22,11 @@ LangGraph 学习与实践项目：Alfred 智能体系列。基于 Hugging Face A
 ```bash
 pip install -r requirements.txt
 
-# 舞会智能体（ReAct 四工具，四场景实测）
+# 舞会智能体（ReAct 工具，四场景实测）
 python3 app.py
+
+# 知识库检索自测（BM25 中文检索）
+python3 knowledge_retriever.py
 
 # 邮件分拣（两种分支）
 python3 alfred_mail_agent.py
@@ -35,7 +40,7 @@ python3 react_agent_one_liner.py
 
 ## Web 界面（可选）
 
-带图形界面的聊天应用，侧边栏可自定义模型提供商、API Token、模型名与 Base URL（支持 OpenAI / DeepSeek / Moonshot / 通义千问等 OpenAI 兼容接口，及 Hugging Face Inference API）：
+带图形界面的聊天应用，侧边栏可自定义模型提供商、API Token、模型名与 Base URL（支持 OpenAI / DeepSeek / Moonshot / 通义千问等 OpenAI 兼容接口，及 Hugging Face Inference API）。智能体除舞会工具外，内置 **AI Agent 课程知识库检索**（`docs/` 下 22 篇笔记，BM25 关键词版），可直接问"什么是 ReAct？""LangGraph 的 State 是什么？"等知识问题。
 
 ```bash
 streamlit run app_web.py
@@ -73,4 +78,5 @@ model = ChatOpenAI(model="gpt-4o", temperature=0).bind_tools(TOOLS)
 ## 说明
 
 - 外部 API（DuckDuckGo 搜索、Hugging Face Hub）在受限网络环境下自动降级为模拟结果，保证演示闭环。
+- `docs/` 知识库快照来自飞书「AI Agent 学习知识库」课程笔记（知识库内容已获授权公开）。本地知识库更新后，可重新从飞书导出同步。
 - 本项目为学习用途，代码中的邮箱、宾客信息均为示例数据。

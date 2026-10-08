@@ -30,6 +30,13 @@ from tools import TOOLS
 GUEST_NAMES = ["ada", "lovelace", "tesla", "turing", "hopper"]
 CITY_WORDS = ["paris", "london", "new york", "tokyo", "beijing", "上海", "北京", "巴黎"]
 AUTHOR_WORDS = ["qwen", "google", "facebook", "meta", "openai", "mistral"]
+# 知识库触发词：课程术语 / 中文知识类提问
+KNOWLEDGE_WORDS = [
+    "知识库", "课程", "学习笔记", "什么是", "是什么", "怎么理解", "讲解", "解释",
+    "react", "langgraph", "llm", "rag", "smolagents", "llamaindex", "agent", "agentic",
+    "智能体", "大语言模型", "工具", "embedding", "提示词", "token", "向量", "检索",
+    "状态", "节点", "边", "循环", "观察", "思考", "行动", "框架",
+]
 
 
 class MockAlfredLLM(Runnable):
@@ -57,6 +64,10 @@ class MockAlfredLLM(Runnable):
         if any(k in q for k in ["search", "搜索", "news", "新闻", "latest", "最新",
                                 "advancement", "进展", "recent", "information about"]):
             plan.append("web_search")              # 网络搜索
+        # 知识库查询：未命中其他工具时，知识类问题走 knowledge_search
+        if not any(n in plan for n in ["guest_info_retriever", "weather_info", "hub_stats"]):
+            if any(k in q for k in KNOWLEDGE_WORDS):
+                plan.append("knowledge_search")
         return plan
 
     # ---- 工具参数提取 ----
@@ -79,6 +90,8 @@ class MockAlfredLLM(Runnable):
                 parts.append(f"根据宾客档案：\n{m.content}")
             elif m.name == "web_search":
                 parts.append(f"基于网络搜索的最新信息：\n{m.content}")
+            elif m.name == "knowledge_search":
+                parts.append(f"根据知识库（AI Agent 课程笔记）：\n{m.content}")
             else:  # weather_info / hub_stats 直接引用
                 parts.append(m.content)
         return "🎩 Alfred:\n\n" + "\n\n".join(parts)

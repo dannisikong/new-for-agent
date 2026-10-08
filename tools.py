@@ -15,6 +15,7 @@ from typing import Optional
 from langchain_core.tools import tool
 
 from retriever import retrieve_guest_info
+from knowledge_retriever import knowledge_search as _kb_search
 
 # ============================================================
 # 工具 1：宾客信息检索（对应课程 guest_info_retriever）
@@ -124,5 +125,22 @@ def hub_stats(author: str) -> str:
     return f"No models found for author {author}."
 
 
+# ============================================================
+# 工具 5：AI Agent 课程知识库检索（BM25 关键词版）
+# ============================================================
+
+@tool
+def knowledge_search(query: str) -> str:
+    """Searches the AI Agent course knowledge base (22 Chinese study notes) and returns the most relevant snippets.
+
+    Use this tool when the user asks about AI Agent concepts, LangGraph, LLMs, RAG,
+    tools, frameworks (smolagents / LlamaIndex / LangGraph), or any topic covered by the course.
+
+    Args:
+        query: The knowledge point or question to search (in Chinese works best).
+    """
+    return _kb_search(query)
+
+
 # 统一工具列表（对应课程 tools=[...]）
-TOOLS = [guest_info_retriever, web_search, weather_info, hub_stats]
+TOOLS = [guest_info_retriever, web_search, weather_info, hub_stats, knowledge_search]
