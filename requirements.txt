@@ -1,5 +1,7 @@
 langgraph>=1.2
 langchain-core
 langchain-openai
+langchain-huggingface
 ddgs
 huggingface_hub
+streamlit>=1.60

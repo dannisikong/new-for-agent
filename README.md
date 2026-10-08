@@ -12,6 +12,8 @@ LangGraph 学习与实践项目：Alfred 智能体系列。基于 Hugging Face A
 | `tools.py` | 四个工具：宾客检索、网络搜索、天气、HF Hub 模型统计（真实 API 优先，失败自动降级） |
 | `app.py` | 舞会智能体：ReAct 循环图（assistant ↔ tools），四场景实测 |
 | `react_agent_one_liner.py` | create_react_agent 一行版对比 |
+| `agent_core.py` | 可复用后端核心：参数化 ReAct 图 + 真实 LLM 工厂（Web UI 使用） |
+| `app_web.py` | Web 界面（Streamlit）：自定义 Token/模型，聊天操作智能体 |
 
 ## 快速开始
 
@@ -30,6 +32,25 @@ python3 alfred_hitl.py
 # 一行版对比
 python3 react_agent_one_liner.py
 ```
+
+## Web 界面（可选）
+
+带图形界面的聊天应用，侧边栏可自定义模型提供商、API Token、模型名与 Base URL（支持 OpenAI / DeepSeek / Moonshot / 通义千问等 OpenAI 兼容接口，及 Hugging Face Inference API）：
+
+```bash
+streamlit run app_web.py
+```
+
+Token 仅在会话内存中使用，不写入代码或仓库。
+
+### 部署到 Streamlit Community Cloud（免费）
+
+1. 代码已在本仓库，无需改动。
+2. 登录 https://streamlit.io/cloud 并用 GitHub 账号授权。
+3. 点击 **New app** → 选择 `dannisikong/new-for-agent` 仓库 → Main branch → 入口文件填 `app_web.py` → Deploy。
+4. 部署完成后获得公开 URL；侧边栏填入你自己的 API Token 即可使用。
+
+> 备选：将本仓库推送到 Hugging Face 创建 Space（Streamlit SDK），同样可直接运行。
 
 ## 技术要点
 
