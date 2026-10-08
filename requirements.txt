@@ -1,0 +1,5 @@
+langgraph>=1.2
+langchain-core
+langchain-openai
+ddgs
+huggingface_hub

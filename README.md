@@ -1,0 +1,55 @@
+# new-for-agent
+
+LangGraph 学习与实践项目：Alfred 智能体系列。基于 Hugging Face Agents 课程（Unit 1–3）的 LangGraph 动手实现，默认使用内置模拟 LLM，无需 API Key 即可运行。
+
+## 项目内容
+
+| 文件 | 说明 |
+|---|---|
+| `alfred_mail_agent.py` | 邮件分拣智能体：5 节点图 + 条件分支（垃圾/正常两路径） |
+| `alfred_hitl.py` | 带 Human-in-the-Loop 的邮件分拣：interrupt / Command(resume) / checkpointer |
+| `retriever.py` | 宾客数据集与关键词检索（模拟 BM25，可替换为 BM25Retriever） |
+| `tools.py` | 四个工具：宾客检索、网络搜索、天气、HF Hub 模型统计（真实 API 优先，失败自动降级） |
+| `app.py` | 舞会智能体：ReAct 循环图（assistant ↔ tools），四场景实测 |
+| `react_agent_one_liner.py` | create_react_agent 一行版对比 |
+
+## 快速开始
+
+```bash
+pip install -r requirements.txt
+
+# 舞会智能体（ReAct 四工具，四场景实测）
+python3 app.py
+
+# 邮件分拣（两种分支）
+python3 alfred_mail_agent.py
+
+# 人工审阅（三种决策：approve / revise / reject）
+python3 alfred_hitl.py
+
+# 一行版对比
+python3 react_agent_one_liner.py
+```
+
+## 技术要点
+
+- **LangGraph 核心构件**：State / Nodes / Edges / 条件分支 / END
+- **ReAct 循环**：`assistant` 节点决定调用哪个工具，`tools_condition` 分岔，`tools → assistant` 回边构成多步循环
+- **Human-in-the-Loop**：`interrupt(payload)` 暂停图 → 外部读取 `__interrupt__` → `Command(resume=决策)` 恢复；需配置 checkpointer
+- **模型兼容**：自定义模型需继承 `Runnable` 并实现 `invoke`，才能用于 `create_react_agent`
+
+## 接入真实 LLM
+
+默认使用规则型模拟 LLM（无需 Key）。配置 API Key 后，将 `app.py` / `alfred_hitl.py` 中的模型替换为：
+
+```python
+from langchain_openai import ChatOpenAI
+model = ChatOpenAI(model="gpt-4o", temperature=0).bind_tools(TOOLS)
+```
+
+图结构无需改动。
+
+## 说明
+
+- 外部 API（DuckDuckGo 搜索、Hugging Face Hub）在受限网络环境下自动降级为模拟结果，保证演示闭环。
+- 本项目为学习用途，代码中的邮箱、宾客信息均为示例数据。
