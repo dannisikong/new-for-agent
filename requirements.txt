@@ -6,3 +6,5 @@ ddgs
 huggingface_hub
 streamlit>=1.60
 jieba>=0.42
+numpy>=1.26
+requests>=2.31

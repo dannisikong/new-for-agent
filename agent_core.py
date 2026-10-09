@@ -18,6 +18,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from tools import TOOLS
 from app import MockAlfredLLM
+from knowledge_retriever import EmbeddingClient, set_embedding_client
 
 
 # ============================================================
@@ -55,10 +56,17 @@ class WebLLM(Runnable):
 
 def make_llm(provider: str, api_key: str, model_name: str,
              base_url: str | None = None) -> Runnable:
-    """统一入口：演示模式返回 MockAlfredLLM，其余返回 WebLLM"""
+    """统一入口：演示模式返回 MockAlfredLLM，其余返回 WebLLM。
+    同时按提供商注入 embedding 配置（OpenAI 兼容 → 开启向量召回；其余 → 纯 BM25）。"""
     if provider == "演示模式（无需 Token）":
+        set_embedding_client(None)
         return MockAlfredLLM()
-    return WebLLM(provider, api_key, model_name, base_url)
+    llm = WebLLM(provider, api_key, model_name, base_url)
+    if provider == "OpenAI 兼容":
+        set_embedding_client(EmbeddingClient(api_key, base_url or "https://api.openai.com/v1"))
+    else:  # Hugging Face 暂不配置 embedding，自动降级纯 BM25
+        set_embedding_client(None)
+    return llm
 
 
 # ============================================================

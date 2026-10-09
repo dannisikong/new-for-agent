@@ -18,7 +18,7 @@ import jieba.posseg as pseg
 from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, START, END
 
-from knowledge_retriever import _get_index
+from knowledge_retriever import hybrid_search
 
 MAX_REWRITES = 2
 TOP_K = 3
@@ -186,8 +186,10 @@ def build_rag_graph(model=None):
 
     def retrieve(state: RAGState):
         question = state["question"]
-        docs = _get_index().search(question, top_k=TOP_K)
-        trace = list(state.get("trace") or []) + [f"🔎 检索（第 {state.get('rewrites', 0) + 1} 轮）：{question}"]
+        docs, source = hybrid_search(question, top_k=TOP_K)
+        trace = list(state.get("trace") or []) + [
+            f"🔎 检索（第 {state.get('rewrites', 0) + 1} 轮）：{question} ｜ 召回：{source}"
+        ]
         if not docs:
             return {"answer": "📭 知识库中没有检索到相关内容，请换个问法试试。", "grade": "empty",
                     "trace": trace}
