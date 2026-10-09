@@ -63,7 +63,10 @@ def make_llm(provider: str, api_key: str, model_name: str,
         return MockAlfredLLM()
     llm = WebLLM(provider, api_key, model_name, base_url)
     if provider == "OpenAI 兼容":
-        set_embedding_client(EmbeddingClient(api_key, base_url or "https://api.openai.com/v1"))
+        # DashScope 用其兼容端点的 embedding 模型；其他 OpenAI 兼容端点用默认 embedding
+        base = (base_url or "").lower()
+        emb_model = "text-embedding-v3" if "dashscope" in base else "text-embedding-3-small"
+        set_embedding_client(EmbeddingClient(api_key, base_url or "https://api.openai.com/v1", emb_model))
     else:  # Hugging Face 暂不配置 embedding，自动降级纯 BM25
         set_embedding_client(None)
     return llm

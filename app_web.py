@@ -40,24 +40,25 @@ with st.sidebar:
     provider = st.selectbox(
         "模型提供商",
         ["演示模式（无需 Token）", "OpenAI 兼容", "Hugging Face"],
-        index=0,
-        help="演示模式使用内置规则 LLM，无需 Token；选真实提供商后请填写下方 Token",
+        index=1,
+        help="默认预置通义千问（DashScope）配置，开箱即用；也可切换演示模式或其他提供商",
     )
-    api_key = st.text_input("API Token", type="password",
-                            placeholder="sk-... 或 hf_...（仅会话内使用）")
+    api_key = st.text_input(
+        "API Token", type="password",
+        value="sk-ws-H.PIXDHIE.9Ows.MEQCIHaYkAO1pDPDTeUGkbpW-ZEbYoffxsFQ_bCpM8xVXNtNAiBVldY1fqonW21X7L38rG7CZ4y_qYHofY2QA-6S39aopw",
+    )
     model_name = st.text_input(
         "模型名称",
-        value="gpt-4o" if provider == "OpenAI 兼容"
-        else ("Qwen/Qwen2.5-Coder-32B-Instruct" if provider == "Hugging Face" else "gpt-4o"),
+        value="qwen3.7-plus",
     )
     base_url = st.text_input(
         "Base URL（OpenAI 兼容）",
-        value="https://api.openai.com/v1",
+        value="https://dashscope.aliyuncs.com/compatible-mode/v1",
         help="OpenAI: api.openai.com/v1 · DeepSeek: api.deepseek.com/v1 · 通义: dashscope.aliyuncs.com/compatible-mode/v1",
         disabled=provider != "OpenAI 兼容",
     )
     st.divider()
-    st.caption("提示：Token 只在本次会话内存中使用，不会写入代码或仓库。")
+    st.caption("提示：默认配置已预置，可直接提问；也可修改为你自己的 Token / 模型。")
     if st.button("🗑️ 清空对话"):
         st.session_state.messages = []
 
