@@ -1,5 +1,3 @@
-# 15 · 第一个LangGraph应用（Alfred邮件分拣）
-
 <title>15 · 第一个LangGraph应用（Alfred邮件分拣）</title>
 
 ![](https://feishu.cn/file/Rp5mbfUOjouyGYx0FSOcj3Qunxd)

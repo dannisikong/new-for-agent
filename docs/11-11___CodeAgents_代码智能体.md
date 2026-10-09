@@ -1,5 +1,3 @@
-# 11 · CodeAgents（代码智能体）
-
 <title>11 · CodeAgents（代码智能体）</title>
 
 ![](https://feishu.cn/file/ZfxNb9966ogCSWxqbRAcwX5InTh)

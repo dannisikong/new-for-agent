@@ -1,5 +1,3 @@
-# 09 · Agentic Frameworks（智能体框架导论）
-
 <title>09 · Agentic Frameworks（智能体框架导论）</title>
 
 ![](https://feishu.cn/file/WX1NbvFWfoVEiCxFwLqcklZnnNh)

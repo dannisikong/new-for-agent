@@ -1,5 +1,3 @@
-# 22 · LangGraph 实战（邮件分拣/人工审阅/舞会智能体）
-
 <title>22 · LangGraph 实战（邮件分拣/人工审阅/舞会智能体）</title>
 
 ![](https://feishu.cn/file/U5ezbYalfo2QKnxDP0lcvc78nog)

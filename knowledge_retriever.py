@@ -133,7 +133,8 @@ class BM25Index:
 
     def search(self, query: str, top_k: int = TOP_K) -> list[dict]:
         """单路 BM25 检索（旧接口，供未配置 embedding 时降级使用）"""
-        return [self._format(rank, score) for rank, (score, i) in enumerate(self.search_raw(query, top_n=top_k))]
+        return [self._format(rank, score, idx)
+                for rank, (score, idx) in enumerate(self.search_raw(query, top_n=top_k))]
 
     def _format(self, rank: int, score: float, idx: int) -> dict:
         c = self.chunks[idx]

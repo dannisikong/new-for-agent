@@ -1,5 +1,3 @@
-# 13 · LangGraph 是什么（控制流与选型）
-
 <title>13 · LangGraph 是什么（控制流与选型）</title>
 
 ![](https://feishu.cn/file/HwiAbmZoQo2oaExYV3wcWkfknkg)

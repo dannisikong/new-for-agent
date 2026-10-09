@@ -1,5 +1,3 @@
-# 03 · Messages and Special Tokens（消息与特殊标记）
-
 <title>03 · Messages and Special Tokens（消息与特殊标记）</title>
 
 ![](https://feishu.cn/file/T1uab134FoNP5IxytUucsKi1nJe)

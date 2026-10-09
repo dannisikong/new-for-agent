@@ -1,5 +1,3 @@
-# 06 · Thought（思考）与 ReAct 方法
-
 <title>06 · Thought（思考）与 ReAct 方法</title>
 
 ![](https://feishu.cn/file/O9heboJ9johaC7xh77TcCDXPnIa)

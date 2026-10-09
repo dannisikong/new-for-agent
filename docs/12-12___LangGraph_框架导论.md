@@ -1,5 +1,3 @@
-# 12 · LangGraph（框架导论）
-
 <title>12 · LangGraph（框架导论）</title>
 
 ![](https://feishu.cn/file/FAJ7bHCI4oQuW4xCcw6cJvGhnjh)

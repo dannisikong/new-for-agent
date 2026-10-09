@@ -1,5 +1,3 @@
-# 05 · Thought-Action-Observation（思考-行动-观察循环）
-
 <title>05 · Thought-Action-Observation（思考-行动-观察循环）</title>
 
 ![](https://feishu.cn/file/QxrSb36plo0jANxNBkrcfsQIn9f)

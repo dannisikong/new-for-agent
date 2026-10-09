@@ -1,5 +1,3 @@
-# 18 · Agentic RAG 智能体
-
 <title>18 · Agentic RAG 智能体</title>
 
 ![](https://feishu.cn/file/OeYobTNOKonUZmxMAGhcIC1enec)

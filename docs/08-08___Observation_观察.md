@@ -1,5 +1,3 @@
-# 08 · Observation（观察）
-
 <title>08 · Observation（观察）</title>
 
 ![](https://feishu.cn/file/IrItbREPaojCWDxU6R6cBOLbnId)
