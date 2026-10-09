@@ -1,5 +1,5 @@
 """
-app_web.py —— Alfred 舞会智能体 · Web 界面（Streamlit）
+app_web.py —— AI Agent 知识问答助手 · Web 界面（Streamlit）
 ========================================================
 侧边栏可自定义：
   - 回答模式：标准智能体（ReAct）/ 知识库智能问答（Agentic RAG）
@@ -16,16 +16,16 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from agent_core import make_llm, build_react_graph
 from agentic_rag import rag_query
 
-st.set_page_config(page_title="Alfred · LangGraph Agent", page_icon="🎩", layout="wide")
+st.set_page_config(page_title="AI Agent 知识助手", page_icon="📚", layout="wide")
 
 SYSTEM_PROMPT = (
-    "You are Alfred, a helpful agent. You have these tools: "
-    "knowledge_search (search the AI Agent course knowledge base, best for questions about "
-    "AI Agent concepts, LangGraph, LLMs, RAG, tools and frameworks), "
-    "guest_info_retriever (gala guest profiles), "
-    "web_search, weather_info and hub_stats (Hugging Face model stats). "
-    "When the user asks a conceptual or knowledge question, prefer knowledge_search first. "
-    "Answer in the user's language. Be polite, concise and helpful."
+    "You are a knowledge assistant specialized in AI Agent topics. "
+    "Your primary tool is knowledge_search, which searches a knowledge base of "
+    "AI Agent course notes (concepts, LangGraph, LLMs, RAG, tools, frameworks); "
+    "use it first for any conceptual or knowledge question. "
+    "Use web_search only when external or up-to-date information is needed. "
+    "Answer in the user's language. Be concise and accurate; "
+    "if the knowledge base has no relevant information, say so rather than making things up."
 )
 
 # ---------------- 侧边栏配置 ----------------
@@ -62,8 +62,8 @@ with st.sidebar:
         st.session_state.messages = []
 
 # ---------------- 主区：聊天界面 ----------------
-st.title("🎩 Alfred — 舞会智能体")
-st.caption("LangGraph：标准 ReAct 智能体 / Agentic RAG 知识库智能问答（检索→评分→重写闭环）")
+st.title("📚 AI Agent 知识助手")
+st.caption("LangGraph 实战项目：ReAct 智能体 / Agentic RAG 知识库智能问答（检索→评分→重写闭环），知识库为 22 篇 AI Agent 课程笔记")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -72,7 +72,7 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-prompt = st.chat_input("问 Alfred 一个问题… 例如：什么是 ReAct？/ Tell me about Dr. Nikola Tesla")
+prompt = st.chat_input("问点 AI Agent 相关的问题… 例如：什么是 ReAct？/ LangGraph 的 State 是什么？")
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -87,7 +87,7 @@ if prompt:
         llm = make_llm(provider, api_key, model_name, base_url)
 
         # 2. 按回答模式运行
-        with st.spinner("Alfred 正在思考并调用工具…"):
+        with st.spinner("正在检索知识库并组织回答…"):
             if answer_mode == "📚 知识库智能问答（Agentic RAG）":
                 # 带缓存：相同问题直接复用上次结果，不重新检索（回答也保持一致）
                 rag_model = None if provider == "演示模式（无需 Token）" else llm

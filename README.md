@@ -1,6 +1,6 @@
 # new-for-agent
 
-LangGraph 学习与实践项目：Alfred 智能体系列。基于 Hugging Face Agents 课程（Unit 1–3）的 LangGraph 动手实现，默认使用内置模拟 LLM，无需 API Key 即可运行。
+LangGraph 学习与实践项目：AI Agent 知识问答助手。基于 Hugging Face Agents 课程（Unit 1–3）的 LangGraph 动手实现，默认使用内置模拟 LLM，无需 API Key 即可运行。核心是一个接入 22 篇课程笔记知识库的 Agentic RAG 问答应用，已部署上线。
 
 ## 项目内容
 
@@ -13,7 +13,7 @@ LangGraph 学习与实践项目：Alfred 智能体系列。基于 Hugging Face A
 | `agentic_rag.py` | **Agentic RAG 闭环（知识库智能问答）**：检索 → 评分 → 不相关重写 → 再检索（上限 2 轮）→ 回答；演示模式规则评分，真实模式 LLM 评分/重写 |
 | `tools.py` | 五个工具：知识库检索、宾客检索、网络搜索、天气、HF Hub 模型统计（真实 API 优先，失败自动降级） |
 | `docs/` | 飞书知识库「AI Agent 学习知识库」22 篇课程笔记的 Markdown 快照（检索数据源） |
-| `app.py` | 舞会智能体：ReAct 循环图（assistant ↔ tools），四场景实测 |
+| `app.py` | 命令行版 ReAct 智能体：ReAct 循环图（assistant ↔ tools），多场景实测 |
 | `react_agent_one_liner.py` | create_react_agent 一行版对比 |
 | `agent_core.py` | 可复用后端核心：参数化 ReAct 图 + 真实 LLM 工厂（Web UI 使用） |
 | `app_web.py` | Web 界面（Streamlit）：自定义 Token/模型，聊天操作智能体 |
@@ -23,7 +23,7 @@ LangGraph 学习与实践项目：Alfred 智能体系列。基于 Hugging Face A
 ```bash
 pip install -r requirements.txt
 
-# 舞会智能体（ReAct 工具，四场景实测）
+# 命令行版 ReAct 智能体（多场景实测）
 python3 app.py
 
 # 知识库检索自测（BM25 中文检索）
