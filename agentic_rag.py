@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, START, END
 
 from knowledge_retriever import hybrid_search
+from tools import web_search as _web_search_tool
 
 MAX_REWRITES = 2
 TOP_K = 3
@@ -60,6 +61,7 @@ KB_WORDS = [
 class RAGState(TypedDict):
     question: str
     retrieved: list
+    web: list
     grade: str
     answer: str
     rewrites: int
@@ -112,8 +114,8 @@ def _rule_rewrite(question: str, docs: list) -> str:
     return new_q.strip() if new_q.strip() else question
 
 
-def _rule_answer(question: str, docs: list, rewrites: int) -> str:
-    """回答：按相关度排序拼接片段，标注来源文档与章节"""
+def _rule_answer(question: str, docs: list, rewrites: int, web: list | None = None) -> str:
+    """回答：按相关度排序拼接片段，标注来源文档与章节；若有网络结果则附在后面"""
     lines = []
     for r in docs:
         lines.append(
@@ -123,6 +125,9 @@ def _rule_answer(question: str, docs: list, rewrites: int) -> str:
     tail = ""
     if rewrites > 0:
         tail = f"\n\n⚠️ 首轮检索被认为不相关，已重写问题重试 {rewrites} 次后给出以上结果。"
+    if web:
+        tail += f"\n\n🌐 知识库未命中，以下为网络补充信息：\n{web[0]}"
+        head = "📚 智能回答（知识库 + 网络降级）\n\n"
     return head + "\n\n---\n\n".join(lines) + tail
 
 
@@ -156,11 +161,12 @@ def _llm_rewrite(model, question: str, docs: list) -> str:
     return str(resp.content).strip()[:120] or question
 
 
-def _llm_answer(model, question: str, docs: list) -> str:
+def _llm_answer(model, question: str, docs: list, web: list | None = None) -> str:
+    web_block = f"\n\n网络搜索补充：\n{web[0]}" if web else ""
     prompt = (
-        "你是知识库问答助手。请仅根据下面的检索片段回答用户问题，不要编造片段之外的内容。\n"
-        f"问题：{question}\n\n检索片段：\n{_docs_text(docs)}\n\n"
-        "用中文回答，简明扼要，并在结尾列出引用到的文档标题。"
+        "你是知识库问答助手。请根据下面的检索片段（和网络补充）回答用户问题，不要编造片段之外的内容。\n"
+        f"问题：{question}\n\n检索片段：\n{_docs_text(docs) if docs else '（知识库未命中）'}{web_block}\n\n"
+        "用中文回答，简明扼要；内容来自知识库时在结尾列出引用到的文档标题，来自网络时标注「网络信息」。"
     )
     resp = model.invoke([HumanMessage(content=prompt)])
     return str(resp.content)
@@ -177,11 +183,7 @@ def build_rag_graph(model=None):
     use_llm = model is not None
 
     def decide(state: RAGState):
-        question = state["question"]
-        if not use_llm and not _is_kb_topic(question):
-            return {"answer": ("🤖 这个问题似乎与 AI Agent 课程知识库的主题无关，"
-                               "建议切换「标准智能体」模式询问，或换个知识库相关的问题。"),
-                    "grade": "done"}
+        # 不再按话题拦截：统一走"知识库 → 不命中降级网络"链路
         return {"grade": "todo"}
 
     def retrieve(state: RAGState):
@@ -191,8 +193,7 @@ def build_rag_graph(model=None):
             f"🔎 检索（第 {state.get('rewrites', 0) + 1} 轮）：{question} ｜ 召回：{source}"
         ]
         if not docs:
-            return {"answer": "📭 知识库中没有检索到相关内容，请换个问法试试。", "grade": "empty",
-                    "trace": trace}
+            return {"grade": "empty", "trace": trace}
         return {"retrieved": docs, "trace": trace}
 
     def grade(state: RAGState):
@@ -211,25 +212,41 @@ def build_rag_graph(model=None):
         trace = list(state["trace"]) + [f"✍️ 重写问题：{question} → {new_q}"]
         return {"question": new_q, "rewrites": state.get("rewrites", 0) + 1, "trace": trace}
 
+    def web_search_node(state: RAGState):
+        """知识库未命中/不相关：降级走网络搜索，结果并入回答"""
+        question = state["question"]
+        try:
+            result = _web_search_tool.invoke({"query": question})
+        except Exception as e:
+            result = f"（网络搜索失败：{e.__class__.__name__}）"
+        trace = list(state["trace"]) + ["🌐 知识库未命中，转网络搜索"]
+        return {"web": [result], "trace": trace}
+
     def answer(state: RAGState):
         question = state["question"]
-        docs = state["retrieved"]
+        docs = state.get("retrieved") or []
+        web = state.get("web") or []
+        if web and not use_llm:
+            docs = []  # 演示模式：已降级网络，不展示不相关的知识库片段
         if use_llm:
-            ans = _llm_answer(model, question, docs)
+            ans = _llm_answer(model, question, docs, web)
         else:
-            ans = _rule_answer(question, docs, state.get("rewrites", 0))
+            ans = _rule_answer(question, docs, state.get("rewrites", 0), web)
         trace = list(state["trace"]) + ["✅ 生成回答"]
         return {"answer": ans, "trace": trace}
 
     def route_after_decide(state: RAGState):
-        return "end" if state["grade"] == "done" else "retrieve"
+        return "retrieve"
 
     def route_after_retrieve(state: RAGState):
-        return "end" if state["grade"] == "empty" else "grade"
+        # 知识库无召回 → 直接降级网络搜索
+        return "web_search" if state["grade"] == "empty" else "grade"
 
     def route_after_grade(state: RAGState):
-        if state["grade"] == "not_relevant" and state.get("rewrites", 0) < MAX_REWRITES:
-            return "rewrite"
+        if state["grade"] == "not_relevant":
+            if state.get("rewrites", 0) < MAX_REWRITES:
+                return "rewrite"
+            return "web_search"  # 重写用尽仍不相关 → 降级网络搜索
         return "answer"
 
     builder = StateGraph(RAGState)
@@ -237,16 +254,19 @@ def build_rag_graph(model=None):
     builder.add_node("retrieve", retrieve)
     builder.add_node("grade", grade)
     builder.add_node("rewrite", rewrite)
+    builder.add_node("web_search", web_search_node)
     builder.add_node("answer", answer)
 
     builder.add_edge(START, "decide")
     builder.add_conditional_edges("decide", route_after_decide,
-                                  {"retrieve": "retrieve", "end": END})
+                                  {"retrieve": "retrieve"})
     builder.add_conditional_edges("retrieve", route_after_retrieve,
-                                  {"grade": "grade", "end": END})
+                                  {"grade": "grade", "web_search": "web_search"})
     builder.add_conditional_edges("grade", route_after_grade,
-                                  {"answer": "answer", "rewrite": "rewrite"})
+                                  {"answer": "answer", "rewrite": "rewrite",
+                                   "web_search": "web_search"})
     builder.add_edge("rewrite", "retrieve")
+    builder.add_edge("web_search", "answer")
     builder.add_edge("answer", END)
     return builder.compile()
 
@@ -270,7 +290,7 @@ def rag_query(question: str, model=None, use_cache: bool = True) -> dict:
                 "cached": True,
             }
     out = build_rag_graph(model).invoke({
-        "question": question, "retrieved": [], "grade": "",
+        "question": question, "retrieved": [], "web": [], "grade": "",
         "answer": "", "rewrites": 0, "trace": [],
     })
     _cache_store(question, out["answer"], out["trace"])
