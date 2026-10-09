@@ -16,16 +16,16 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from agent_core import make_llm, build_react_graph
 from agentic_rag import rag_query
 
-st.set_page_config(page_title="AI Agent 知识助手", page_icon="📚", layout="wide")
+st.set_page_config(page_title="智能知识助手", page_icon="📚", layout="wide")
 
 SYSTEM_PROMPT = (
-    "You are a knowledge assistant specialized in AI Agent topics. "
-    "Your primary tool is knowledge_search, which searches a knowledge base of "
-    "AI Agent course notes (concepts, LangGraph, LLMs, RAG, tools, frameworks); "
-    "use it first for any conceptual or knowledge question. "
-    "Use web_search only when external or up-to-date information is needed. "
+    "You are a helpful, general-purpose knowledge assistant. "
+    "You have a knowledge_search tool covering a course-notes knowledge base on "
+    "AI Agent concepts, LangGraph, LLMs, RAG, tools and frameworks; use it when the question matches that domain. "
+    "You also have web_search for external or up-to-date information. "
+    "For other questions, answer from your own knowledge. "
     "Answer in the user's language. Be concise and accurate; "
-    "if the knowledge base has no relevant information, say so rather than making things up."
+    "if you are unsure, say so rather than making things up."
 )
 
 # ---------------- 侧边栏配置 ----------------
@@ -62,8 +62,8 @@ with st.sidebar:
         st.session_state.messages = []
 
 # ---------------- 主区：聊天界面 ----------------
-st.title("📚 AI Agent 知识助手")
-st.caption("LangGraph 实战项目：ReAct 智能体 / Agentic RAG 知识库智能问答（检索→评分→重写闭环），知识库为 22 篇 AI Agent 课程笔记")
+st.title("📚 智能知识助手")
+st.caption("LangGraph 实战应用：ReAct 智能体 / Agentic RAG 知识库问答（检索→评分→重写闭环），内置 AI Agent 课程知识库，可自由切换模型")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -72,7 +72,7 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-prompt = st.chat_input("问点 AI Agent 相关的问题… 例如：什么是 ReAct？/ LangGraph 的 State 是什么？")
+prompt = st.chat_input("输入你的问题… 例如：什么是 RAG？/ LangGraph 和 LangChain 是什么关系？")
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})

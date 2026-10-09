@@ -1,6 +1,6 @@
 # new-for-agent
 
-LangGraph 学习与实践项目：AI Agent 知识问答助手。基于 Hugging Face Agents 课程（Unit 1–3）的 LangGraph 动手实现，默认使用内置模拟 LLM，无需 API Key 即可运行。核心是一个接入 22 篇课程笔记知识库的 Agentic RAG 问答应用，已部署上线。
+LangGraph 学习与实践项目：一个可自定义模型的智能问答助手。基于 Hugging Face Agents 课程（Unit 1–3）的 LangGraph 动手实现，默认使用内置模拟 LLM，无需 API Key 即可运行。内置 AI Agent 课程笔记知识库（Agentic RAG 闭环），也支持通过自定义 Token 接入任意 OpenAI 兼容模型进行通用问答。
 
 ## 项目内容
 
