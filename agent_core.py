@@ -19,6 +19,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from tools import TOOLS
 from app import MockAlfredLLM
 from knowledge_retriever import EmbeddingClient, set_embedding_client
+from agentic_rag import _memory  # 复用同一个 checkpointer（Sqlite/Memory 自动降级）
 
 
 # ============================================================
@@ -93,4 +94,4 @@ def build_react_graph(model: Runnable):
     builder.add_edge(START, "assistant")
     builder.add_conditional_edges("assistant", tools_condition)
     builder.add_edge("tools", "assistant")
-    return builder.compile()
+    return builder.compile(checkpointer=_memory)

@@ -104,10 +104,13 @@ if prompt:
                     st.caption("⚡ 命中查询缓存：相同问题直接复用上次答案，未重新检索")
             else:
                 graph = build_react_graph(llm)
-                result = graph.invoke({"messages": [
-                    SystemMessage(content=SYSTEM_PROMPT),
-                    HumanMessage(content=prompt),
-                ]})
+                result = graph.invoke(
+                    {"messages": [
+                        SystemMessage(content=SYSTEM_PROMPT),
+                        HumanMessage(content=prompt),
+                    ]},
+                    config={"configurable": {"thread_id": st.session_state.thread_id}},
+                )
                 answer = result["messages"][-1].content
                 # 标准模式的工具调用轨迹
                 trace = []
