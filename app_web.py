@@ -14,7 +14,8 @@ import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 from agent_core import make_llm, build_react_graph
-from agentic_rag import rag_query
+from agentic_rag import rag_query, build_rag_graph
+from langgraph.types import Command
 
 st.set_page_config(page_title="智能知识助手", page_icon="📚", layout="wide")
 
@@ -80,6 +81,20 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
+# 人在回路：interrupt 等待确认时显示按钮
+if st.session_state.get("waiting_resume"):
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("✅ 继续回答", type="primary"):
+            st.session_state.waiting_resume_choice = "继续回答"
+            st.rerun()
+    with c2:
+        if st.button("🔄 换个问题"):
+            st.session_state.waiting_resume_choice = "换个问题"
+            st.session_state.messages = [m for m in st.session_state.messages
+                                        if not m["content"].startswith("📋 检索到资料")]
+            st.rerun()
+
 prompt = st.chat_input("输入你的问题… 例如：什么是 RAG？/ LangGraph 和 LangChain 是什么关系？")
 
 if prompt:
@@ -97,14 +112,33 @@ if prompt:
         # 2. 按回答模式运行
         with st.spinner("正在检索知识库并组织回答…"):
             if answer_mode == "📚 知识库智能问答（Agentic RAG）":
-                # 带缓存：相同问题直接复用上次结果，不重新检索（回答也保持一致）
                 rag_model = None if provider == "演示模式（无需 Token）" else llm
-                result = rag_query(prompt, model=rag_model,
-                                   thread_id=st.session_state.thread_id)
-                answer = result["answer"]
-                trace = result.get("trace", [])
-                if result.get("cached"):
-                    st.caption("⚡ 命中查询缓存：相同问题直接复用上次答案，未重新检索")
+                graph = build_rag_graph(rag_model)
+                cfg = {"configurable": {"thread_id": st.session_state.thread_id}}
+
+                # 如果上次停在 interrupt，这次是用户点了"继续回答"
+                if st.session_state.get("waiting_resume"):
+                    user_choice = st.session_state.pop("waiting_resume_choice", "继续回答")
+                    out = graph.invoke(Command(resume=user_choice), config=cfg)
+                else:
+                    out = graph.invoke(
+                        {"messages": [HumanMessage(content=prompt)],
+                         "question": prompt, "retrieved": [], "web": [],
+                         "grade": "", "rewrites": 0, "trace": []},
+                        config=cfg,
+                    )
+
+                # 检测是否又遇到 interrupt（人在回路确认）
+                if "__interrupt__" in out:
+                    intr = out["__interrupt__"][0].value
+                    st.session_state.waiting_resume = True
+                    st.session_state.messages.append({"role": "assistant",
+                        "content": f"📋 检索到资料：{', '.join(intr.get('docs', []))}\n\n要继续回答这个问题吗？"})
+                    st.rerun()  # 重跑脚本，让下面的聊天区显示确认消息和按钮
+
+                answer = out.get("answer", "")
+                trace = out.get("trace", [])
+                st.session_state.waiting_resume = False
             else:
                 graph = build_react_graph(llm)
                 result = graph.invoke(

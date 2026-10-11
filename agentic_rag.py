@@ -18,6 +18,7 @@ import jieba.posseg as pseg
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
+from langgraph.types import interrupt
 
 from knowledge_retriever import hybrid_search
 from tools import web_search as _web_search_tool
@@ -250,6 +251,22 @@ def build_rag_graph(model=None):
         trace = list(state["trace"]) + ["🌐 知识库未命中，转网络搜索"]
         return {"web": [result], "trace": trace}
 
+    def confirm(state: RAGState):
+        """人在回路：检索到资料后暂停，等用户确认再生成回答。"""
+        if not use_llm:
+            return {}  # 演示模式不 interrupt
+        docs = state.get("retrieved") or []
+        titles = [d.get("doc_title", "片段") for d in docs[:3]]
+        # interrupt 会把 state 存进 checkpointer，然后暂停
+        choice = interrupt({
+            "type": "confirm_answer",
+            "question": state["question"],
+            "docs": titles,
+        })
+        # 用户点"继续"后从这里恢复，choice 是 resume 传回来的值
+        trace = list(state["trace"]) + [f"👤 用户确认：{choice}"]
+        return {"trace": trace}
+
     def answer(state: RAGState):
         question = state["question"]
         docs = state.get("retrieved") or []
@@ -279,7 +296,7 @@ def build_rag_graph(model=None):
             if state.get("rewrites", 0) < MAX_REWRITES:
                 return "rewrite"
             return "web_search"  # 重写用尽仍不相关 → 降级网络搜索
-        return "answer"
+        return "confirm"  # 相关 → 先等人确认再回答
 
     builder = StateGraph(RAGState)
     builder.add_node("decide", decide)
@@ -287,6 +304,7 @@ def build_rag_graph(model=None):
     builder.add_node("grade", grade)
     builder.add_node("rewrite", rewrite)
     builder.add_node("web_search", web_search_node)
+    builder.add_node("confirm", confirm)
     builder.add_node("answer", answer)
 
     builder.add_edge(START, "decide")
@@ -295,10 +313,11 @@ def build_rag_graph(model=None):
     builder.add_conditional_edges("retrieve", route_after_retrieve,
                                   {"grade": "grade", "web_search": "web_search"})
     builder.add_conditional_edges("grade", route_after_grade,
-                                  {"answer": "answer", "rewrite": "rewrite",
+                                  {"confirm": "confirm", "rewrite": "rewrite",
                                    "web_search": "web_search"})
     builder.add_edge("rewrite", "retrieve")
     builder.add_edge("web_search", "answer")
+    builder.add_edge("confirm", "answer")
     builder.add_edge("answer", END)
     return builder.compile(checkpointer=_memory)
 
