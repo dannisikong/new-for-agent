@@ -61,6 +61,8 @@ with st.sidebar:
     st.caption("提示：默认配置已预置，可直接提问；也可修改为你自己的 Token / 模型。")
     if st.button("🗑️ 清空对话"):
         st.session_state.messages = []
+        import uuid
+        st.session_state.thread_id = f"web-{uuid.uuid4().hex[:8]}"
 
 # ---------------- 主区：聊天界面 ----------------
 st.title("📚 智能知识助手")
@@ -68,6 +70,8 @@ st.caption("LangGraph 实战应用：ReAct 智能体 / Agentic RAG 知识库问�
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+    import uuid
+    st.session_state.thread_id = f"web-{uuid.uuid4().hex[:8]}"
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
@@ -92,7 +96,8 @@ if prompt:
             if answer_mode == "📚 知识库智能问答（Agentic RAG）":
                 # 带缓存：相同问题直接复用上次结果，不重新检索（回答也保持一致）
                 rag_model = None if provider == "演示模式（无需 Token）" else llm
-                result = rag_query(prompt, model=rag_model)
+                result = rag_query(prompt, model=rag_model,
+                                   thread_id=st.session_state.thread_id)
                 answer = result["answer"]
                 trace = result.get("trace", [])
                 if result.get("cached"):
