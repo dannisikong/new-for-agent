@@ -104,13 +104,10 @@ if prompt:
                     st.caption("⚡ 命中查询缓存：相同问题直接复用上次答案，未重新检索")
             else:
                 graph = build_react_graph(llm)
-                msgs = [SystemMessage(content=SYSTEM_PROMPT)]
-                for m in st.session_state.messages:
-                    if m["role"] == "user":
-                        msgs.append(HumanMessage(content=m["content"]))
-                    else:
-                        msgs.append(AIMessage(content=m["content"]))
-                result = graph.invoke({"messages": msgs})
+                result = graph.invoke({"messages": [
+                    SystemMessage(content=SYSTEM_PROMPT),
+                    HumanMessage(content=prompt),
+                ]})
                 answer = result["messages"][-1].content
                 # 标准模式的工具调用轨迹
                 trace = []
