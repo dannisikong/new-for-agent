@@ -11,15 +11,30 @@ agentic_rag.py —— Agentic RAG 闭环（知识库智能问答）
 """
 
 import re
-from typing import TypedDict
+from typing import TypedDict, Annotated
 
 import jieba
 import jieba.posseg as pseg
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
 
 from knowledge_retriever import hybrid_search
 from tools import web_search as _web_search_tool
+
+# 多轮记忆 checkpointer：优先 Sqlite（持久化），未装包时降级 Memory（重启丢失）
+try:
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    import sqlite3
+    _conn = sqlite3.connect("checkpoints.db", check_same_thread=False)
+    _memory = SqliteSaver(_conn)
+    try:
+        _memory.setup()
+    except Exception:
+        pass
+except ImportError:
+    from langgraph.checkpoint.memory import MemorySaver
+    _memory = MemorySaver()
 
 MAX_REWRITES = 2
 TOP_K = 3
@@ -66,6 +81,8 @@ class RAGState(TypedDict):
     answer: str
     rewrites: int
     trace: list
+    # 多轮对话历史：add_messages 自动 append，checkpointer 持久化
+    messages: Annotated[list, add_messages]
 
 
 # ============================================================
@@ -161,10 +178,21 @@ def _llm_rewrite(model, question: str, docs: list) -> str:
     return str(resp.content).strip()[:120] or question
 
 
-def _llm_answer(model, question: str, docs: list, web: list | None = None) -> str:
+def _llm_answer(model, question: str, docs: list, web: list | None = None,
+                history: list | None = None) -> str:
     web_block = f"\n\n网络搜索补充：\n{web[0]}" if web else ""
+    # 把最近几轮对话历史拼进去，让 LLM 理解"它/这个/第二点"指代
+    history_block = ""
+    if history:
+        lines = []
+        for m in history:
+            role = "用户" if isinstance(m, HumanMessage) else "助手"
+            lines.append(f"{role}：{m.content}")
+        history_block = "\n\n最近对话历史：\n" + "\n".join(lines)
     prompt = (
         "你是知识库问答助手。请根据下面的检索片段（和网络补充）回答用户问题，不要编造片段之外的内容。\n"
+        "注意：用户问题里的「它/这个/上面/第二点」等指代，要结合对话历史理解。\n"
+        f"{history_block}\n\n"
         f"问题：{question}\n\n检索片段：\n{_docs_text(docs) if docs else '（知识库未命中）'}{web_block}\n\n"
         "用中文回答，简明扼要；内容来自知识库时在结尾列出引用到的文档标题，来自网络时标注「网络信息」。"
     )
@@ -229,11 +257,15 @@ def build_rag_graph(model=None):
         if web and not use_llm:
             docs = []  # 演示模式：已降级网络，不展示不相关的知识库片段
         if use_llm:
-            ans = _llm_answer(model, question, docs, web)
+            # 把最近 3 轮历史传给 LLM，让它理解"它/这个"指代
+            history = state.get("messages", [])[-6:]  # 最近 3 轮（Q+A）
+            ans = _llm_answer(model, question, docs, web, history)
         else:
             ans = _rule_answer(question, docs, state.get("rewrites", 0), web)
         trace = list(state["trace"]) + ["✅ 生成回答"]
-        return {"answer": ans, "trace": trace}
+        # 把本轮 AI 回答写进 messages（HumanMessage 在 invoke 时已加）
+        return {"answer": ans, "trace": trace,
+                "messages": [AIMessage(content=ans)]}
 
     def route_after_decide(state: RAGState):
         return "retrieve"
@@ -268,17 +300,19 @@ def build_rag_graph(model=None):
     builder.add_edge("rewrite", "retrieve")
     builder.add_edge("web_search", "answer")
     builder.add_edge("answer", END)
-    return builder.compile()
+    return builder.compile(checkpointer=_memory)
 
 
 # ============================================================
 # 带缓存的统一查询入口（供 Web / 命令行使用）
 # ============================================================
 
-def rag_query(question: str, model=None, use_cache: bool = True) -> dict:
+def rag_query(question: str, model=None, use_cache: bool = True,
+              thread_id: str = "default") -> dict:
     """知识库智能问答统一入口：
     - 命中缓存（相同规范化问题）→ 直接复用上次答案与轨迹，不重新检索
     - 未命中 → 跑完整 RAG 闭环并写入缓存
+    - thread_id：多轮记忆标识，同一 thread 连续对话自动带历史
     返回 {answer, trace, cached}。
     """
     if use_cache:
@@ -289,10 +323,16 @@ def rag_query(question: str, model=None, use_cache: bool = True) -> dict:
                 "trace": ["⚡ 缓存命中：相同问题直接复用上次结果，未重新检索"] + list(hit["trace"]),
                 "cached": True,
             }
-    out = build_rag_graph(model).invoke({
-        "question": question, "retrieved": [], "web": [], "grade": "",
-        "answer": "", "rewrites": 0, "trace": [],
-    })
+    graph = build_rag_graph(model)
+    out = graph.invoke(
+        {
+            "messages": [HumanMessage(content=question)],  # 本轮问题，reducer 自动 append
+            "question": question,
+            "retrieved": [], "web": [], "grade": "",
+            "rewrites": 0, "trace": [],
+        },
+        config={"configurable": {"thread_id": thread_id}},
+    )
     _cache_store(question, out["answer"], out["trace"])
     return {"answer": out["answer"], "trace": out["trace"], "cached": False}
 
