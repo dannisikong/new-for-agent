@@ -49,7 +49,8 @@ with st.sidebar:
     )
     api_key = st.text_input(
         "API Token", type="password",
-        value="sk-ws-H.PIXDHIE.9Ows.MEQCIHaYkAO1pDPDTeUGkbpW-ZEbYoffxsFQ_bCpM8xVXNtNAiBVldY1fqonW21X7L38rG7CZ4y_qYHofY2QA-6S39aopw",
+        value="",
+        help="填入你自己的 OpenAI 兼容 API Key（不会写入代码，仅本次会话内存）",
     )
     model_name = st.text_input(
         "模型名称",
