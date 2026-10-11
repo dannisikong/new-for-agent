@@ -87,6 +87,52 @@ class RAGState(TypedDict):
 
 
 # ============================================================
+# P0-2：Guardrails（输入注入检测 / 越界话题 / 输出泄露防护）
+# ============================================================
+
+# Prompt Injection 关键词（中英文）
+_INJECTION_PATTERNS = [
+    "忽略之前的指令", "忽略以上", "忽略所有指令", "忘掉之前",
+    "ignore previous", "ignore all instructions", "forget your instructions",
+    "reveal your system prompt", "你的系统提示词", "打印你的提示词",
+    "现在你是", "你不再是", "act as", "pretend you are",
+]
+
+# 越界话题（简单黑名单）
+_OFFTOPIC_PATTERNS = [
+    "how to make a bomb", "制造炸弹", "制毒", "贩毒", "hack into",
+    "如何黑进", "信用卡盗刷", "fake id",
+]
+
+
+def _guardrail_in(question: str) -> tuple[str, list]:
+    """返回 (是否拒绝回答, trace 警告列表)。
+    - 命中越界话题 → 直接拒绝
+    - 命中注入模式 → 不阻断，但 trace 记警告，让 LLM 看到提醒
+    """
+    q = question.lower()
+    warnings = []
+    for p in _OFFTOPIC_PATTERNS:
+        if p in q:
+            return "blocked", [f"🚫 检测到越界话题（{p}），已拒绝回答"]
+    for p in _INJECTION_PATTERNS:
+        if p in q:
+            warnings.append(f"⚠️ 检测到可疑指令模式（{p}），已标记但不阻断")
+    return "pass", warnings
+
+
+def _guardrail_out(answer: str) -> str:
+    """输出侧：如果回答泄露了 SYSTEM_PROMPT 的关键句，替换掉。"""
+    leaks = [
+        "you are a helpful, general-purpose knowledge assistant",
+        "你是一个有帮助的通用知识助手",
+    ]
+    for leak in leaks:
+        answer = answer.replace(leak, "[系统提示词已隐藏]")
+    return answer
+
+
+# ============================================================
 # 演示模式：规则型 判断 / 评分 / 重写 / 回答
 # ============================================================
 
@@ -230,8 +276,12 @@ def build_rag_graph(model=None):
     use_llm = model is not None
 
     def decide(state: RAGState):
-        # 不再按话题拦截：统一走"知识库 → 不命中降级网络"链路
-        return {"grade": "todo"}
+        # Guardrails 输入检查：越界话题直接拒绝；注入模式记警告不阻断
+        result, warnings = _guardrail_in(state["question"])
+        trace = list(state.get("trace") or []) + warnings
+        if result == "blocked":
+            return {"grade": "blocked", "trace": trace}
+        return {"grade": "todo", "trace": trace}
 
     def retrieve(state: RAGState):
         question = state["question"]
@@ -293,20 +343,28 @@ def build_rag_graph(model=None):
         question = state["question"]
         docs = state.get("retrieved") or []
         web = state.get("web") or []
+        # Guardrails：越界话题直接拒绝
+        if state.get("grade") == "blocked":
+            ans = "抱歉，这个问题不在我能回答的范围内。"
+            trace = list(state["trace"]) + ["🚫 已拒绝回答"]
+            return {"answer": ans, "trace": trace,
+                    "messages": [AIMessage(content=ans)]}
         if web and not use_llm:
-            docs = []  # 演示模式：已降级网络，不展示不相关的知识库片段
+            docs = []
         if use_llm:
-            # 把最近 3 轮历史传给 LLM，让它理解"它/这个"指代
-            history = state.get("messages", [])[-6:]  # 最近 3 轮（Q+A）
+            history = state.get("messages", [])[-6:]
             ans = _llm_answer(model, question, docs, web, history)
         else:
             ans = _rule_answer(question, docs, state.get("rewrites", 0), web)
+        # Guardrails 输出检查：防 system prompt 泄露
+        ans = _guardrail_out(ans)
         trace = list(state["trace"]) + ["✅ 生成回答"]
-        # 把本轮 AI 回答写进 messages（HumanMessage 在 invoke 时已加）
         return {"answer": ans, "trace": trace,
                 "messages": [AIMessage(content=ans)]}
 
     def route_after_decide(state: RAGState):
+        if state.get("grade") == "blocked":
+            return "answer"
         return "retrieve"
 
     def route_after_retrieve(state: RAGState):
@@ -331,7 +389,7 @@ def build_rag_graph(model=None):
 
     builder.add_edge(START, "decide")
     builder.add_conditional_edges("decide", route_after_decide,
-                                  {"retrieve": "retrieve"})
+                                  {"retrieve": "retrieve", "answer": "answer"})
     builder.add_conditional_edges("retrieve", route_after_retrieve,
                                   {"grade": "grade", "web_search": "web_search"})
     builder.add_conditional_edges("grade", route_after_grade,
