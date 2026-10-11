@@ -164,9 +164,13 @@ def _llm_grade(model, question: str, docs: list) -> str:
         f"问题：{question}\n\n检索片段：\n{_docs_text(docs)}\n\n"
         '只输出 JSON，形如 {"grade": "relevant"} 或 {"grade": "not_relevant"}'
     )
-    resp = model.invoke([HumanMessage(content=prompt)])
-    m = re.search(r'"grade"\s*:\s*"(relevant|not_relevant)"', str(resp.content))
-    return m.group(1) if m else "relevant"
+    try:
+        resp = model.invoke([HumanMessage(content=prompt)])
+        m = re.search(r'"grade"\s*:\s*"(relevant|not_relevant)"', str(resp.content))
+        return m.group(1) if m else "relevant"
+    except Exception:
+        # L3 降级：评分模型不可用，默认放行（不让流程卡死）
+        return "relevant"
 
 
 def _llm_rewrite(model, question: str, docs: list) -> str:
@@ -175,14 +179,16 @@ def _llm_rewrite(model, question: str, docs: list) -> str:
         f"原问题：{question}\n检索到的片段主题：{_docs_text(docs)}\n\n"
         "只输出重写后的检索式，不要任何解释。"
     )
-    resp = model.invoke([HumanMessage(content=prompt)])
-    return str(resp.content).strip()[:120] or question
+    try:
+        resp = model.invoke([HumanMessage(content=prompt)])
+        return str(resp.content).strip()[:120] or question
+    except Exception:
+        return question  # 降级：用原问题再试一次
 
 
 def _llm_answer(model, question: str, docs: list, web: list | None = None,
                 history: list | None = None) -> str:
     web_block = f"\n\n网络搜索补充：\n{web[0]}" if web else ""
-    # 把最近几轮对话历史拼进去，让 LLM 理解"它/这个/第二点"指代
     history_block = ""
     if history:
         lines = []
@@ -197,8 +203,20 @@ def _llm_answer(model, question: str, docs: list, web: list | None = None,
         f"问题：{question}\n\n检索片段：\n{_docs_text(docs) if docs else '（知识库未命中）'}{web_block}\n\n"
         "用中文回答，简明扼要；内容来自知识库时在结尾列出引用到的文档标题，来自网络时标注「网络信息」。"
     )
-    resp = model.invoke([HumanMessage(content=prompt)])
-    return str(resp.content)
+    try:
+        resp = model.invoke([HumanMessage(content=prompt)])
+        return str(resp.content)
+    except Exception as e:
+        # L3 核心降级：LLM 全挂时，不调模型，直接拼检索原文给用户
+        # 这样至少能看到资料，不会白屏
+        fallback = f"⚠️ 模型暂不可用（{e.__class__.__name__}），以下为检索到的知识库原文：\n\n"
+        if docs:
+            fallback += _docs_text(docs)
+        elif web:
+            fallback += f"网络搜索结果：\n{web[0]}"
+        else:
+            fallback += "（未检索到相关内容）"
+        return fallback
 
 
 # ============================================================
@@ -217,7 +235,11 @@ def build_rag_graph(model=None):
 
     def retrieve(state: RAGState):
         question = state["question"]
-        docs, source = hybrid_search(question, top_k=TOP_K)
+        try:
+            docs, source = hybrid_search(question, top_k=TOP_K)
+        except Exception as e:
+            # L4: 知识库检索失败不拖垮整轮，降级为空 → 走 web 搜索
+            docs, source = [], f"检索异常（{e.__class__.__name__}），降级网络"
         trace = list(state.get("trace") or []) + [
             f"🔎 检索（第 {state.get('rewrites', 0) + 1} 轮）：{question} ｜ 召回：{source}"
         ]

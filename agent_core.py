@@ -48,6 +48,7 @@ class WebLLM(Runnable):
                 api_key=api_key,
                 base_url=base_url or None,
                 temperature=0,
+                max_retries=2,  # L1: 网络抖动自动重试 2 次（指数退避）
             )
         self.llm = self.llm.bind_tools(TOOLS)
 
