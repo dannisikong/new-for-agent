@@ -270,9 +270,10 @@ def _llm_answer(model, question: str, docs: list, web: list | None = None,
 #                            └→（not_relevant）rewrite → retrieve
 # ============================================================
 
-def build_rag_graph(model=None):
+def build_rag_graph(model=None, human_review: bool = True):
     """model=None → 演示模式（纯规则，无需 Token）；
-    传入 Runnable（真实 LLM）→ 评分/重写/回答全部由 LLM 完成。"""
+    传入 Runnable（真实 LLM）→ 评分/重写/回答全部由 LLM 完成。
+    human_review=False → 跳过 confirm 节点（评测/批量跑时用）。"""
     use_llm = model is not None
 
     def decide(state: RAGState):
@@ -325,17 +326,15 @@ def build_rag_graph(model=None):
 
     def confirm(state: RAGState):
         """人在回路：检索到资料后暂停，等用户确认再生成回答。"""
-        if not use_llm:
-            return {}  # 演示模式不 interrupt
+        if not use_llm or not human_review:
+            return {}  # 演示模式或评测模式不 interrupt
         docs = state.get("retrieved") or []
         titles = [d.get("doc_title", "片段") for d in docs[:3]]
-        # interrupt 会把 state 存进 checkpointer，然后暂停
         choice = interrupt({
             "type": "confirm_answer",
             "question": state["question"],
             "docs": titles,
         })
-        # 用户点"继续"后从这里恢复，choice 是 resume 传回来的值
         trace = list(state["trace"]) + [f"👤 用户确认：{choice}"]
         return {"trace": trace}
 

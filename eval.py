@@ -60,8 +60,15 @@ def run_one(rag_graph, llm, item: dict) -> dict:
     retrieved_titles = [d.get("doc_title", "") for d in retrieved]
 
     # 1. 召回准确率：应命中的文档是否在 retrieved 里
+    # expected_doc 格式："01-01___Agent_智能体.md"，提取章节号 "01"
     expected_doc = item["expected_doc"]
-    hit_recall = any(expected_doc in t or t in expected_doc for t in retrieved_titles)
+    m = re.match(r"(\d+)-", expected_doc)
+    expected_num = m.group(1) if m else ""
+    # retrieved title 格式："<title>01 · Agent（智能体）</title>"
+    hit_recall = any(
+        expected_num in re.findall(r"(\d+)\s*[·.•]", t) or expected_num in t.split()[0]
+        for t in retrieved_titles
+    )
 
     # 2. LLM-as-Judge 打分
     judge_input = JUDGE_PROMPT.format(
@@ -108,7 +115,7 @@ def main():
     print("=" * 70)
 
     llm = make_judge_llm(args.base_url, args.api_key, args.model)
-    rag_graph = build_rag_graph(llm)
+    rag_graph = build_rag_graph(llm, human_review=False)  # 评测跳过 confirm
 
     items = EVAL_DATASET[:args.limit] if args.limit > 0 else EVAL_DATASET
     results = []
