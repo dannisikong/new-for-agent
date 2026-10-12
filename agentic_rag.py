@@ -243,11 +243,17 @@ def _llm_answer(model, question: str, docs: list, web: list | None = None,
             lines.append(f"{role}：{m.content}")
         history_block = "\n\n最近对话历史：\n" + "\n".join(lines)
     prompt = (
-        "你是知识库问答助手。请根据下面的检索片段（和网络补充）回答用户问题，不要编造片段之外的内容。\n"
+        "你是知识库问答助手。按以下规则回答：\n"
+        "1. 以检索片段为主要依据回答，不要编造片段里完全没有的事实\n"
+        "2. 片段里有相关内容但不完整时，基于已有内容尽量回答，不要说「没找到」\n"
+        "3. 先回答问题本身，问什么答什么，不要绕弯子\n"
+        "4. 对比类问题：分点列出 A 和 B 的区别\n"
+        "5. 操作类问题：列出具体步骤\n"
+        "6. 概念类问题：先给定义，再列 2-3 个要点\n"
         "注意：用户问题里的「它/这个/上面/第二点」等指代，要结合对话历史理解。\n"
         f"{history_block}\n\n"
         f"问题：{question}\n\n检索片段：\n{_docs_text(docs) if docs else '（知识库未命中）'}{web_block}\n\n"
-        "用中文回答，简明扼要；内容来自知识库时在结尾列出引用到的文档标题，来自网络时标注「网络信息」。"
+        "用中文回答。结尾列出引用到的文档标题；来自网络的标注「网络信息」。"
     )
     try:
         resp = model.invoke([HumanMessage(content=prompt)])

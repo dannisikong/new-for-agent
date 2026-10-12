@@ -19,7 +19,7 @@ import re
 import jieba
 
 DOCS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
-TOP_K = 3
+TOP_K = 5
 RECALL_N = 10  # 每路召回数量（融合前）
 RRF_K = 60     # RRF 常数（经验值）
 
