@@ -33,6 +33,18 @@ SYSTEM_PROMPT = (
 )
 
 # ---------------- 侧边栏配置 ----------------
+import json
+import uuid as _uuid
+
+# 初始化已保存配置（会话内）
+if "saved_configs" not in st.session_state:
+    st.session_state.saved_configs = {}  # {名字: {base_url, api_key, model_name, provider}}
+
+# 写 localStorage 的 JS 片段（保存/删除时调用）
+def _write_local_storage_js(configs: dict):
+    safe = json.dumps(configs).replace("'", "\\'")
+    return f"""<script>try{{localStorage.setItem('saved_model_configs', '{safe}');}}catch(e){{console.warn(e);}}</script>"""
+
 with st.sidebar:
     st.header("⚙️ 智能体配置")
     answer_mode = st.selectbox(
@@ -41,33 +53,96 @@ with st.sidebar:
         index=0,
         help="知识库智能问答走「检索→评分→不相关重写→再检索」闭环，适合问 AI Agent 课程知识点",
     )
+
+    # ---- 已保存配置选择 ----
+    config_names = list(st.session_state.saved_configs.keys())
+    selected_name = st.selectbox(
+        "已保存的模型配置",
+        ["（不使用已保存配置）"] + config_names,
+        index=0,
+        help="选择后自动填回下面三个字段",
+    )
+
+    # 选了某个已保存配置 → 填回表单
+    _init_cfg = {"provider": "OpenAI 兼容", "api_key": "",
+                 "model_name": "qwen3.7-plus",
+                 "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"}
+    if selected_name != "（不使用已保存配置）" and selected_name in st.session_state.saved_configs:
+        _init_cfg = st.session_state.saved_configs[selected_name]
+
     provider = st.selectbox(
         "模型提供商",
         ["演示模式（无需 Token）", "OpenAI 兼容", "Hugging Face"],
-        index=1,
-        help="默认预置通义千问（DashScope）配置，开箱即用；也可切换演示模式或其他提供商",
+        index=["演示模式（无需 Token）", "OpenAI 兼容", "Hugging Face"].index(_init_cfg.get("provider", "OpenAI 兼容")),
     )
     api_key = st.text_input(
         "API Token", type="password",
-        value="",
+        value=_init_cfg.get("api_key", ""),
         help="填入你自己的 OpenAI 兼容 API Key（不会写入代码，仅本次会话内存）",
     )
     model_name = st.text_input(
         "模型名称",
-        value="qwen3.7-plus",
+        value=_init_cfg.get("model_name", "qwen3.7-plus"),
     )
     base_url = st.text_input(
         "Base URL（OpenAI 兼容）",
-        value="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        value=_init_cfg.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
         help="OpenAI: api.openai.com/v1 · DeepSeek: api.deepseek.com/v1 · 通义: dashscope.aliyuncs.com/compatible-mode/v1",
         disabled=provider != "OpenAI 兼容",
     )
+
+    # ---- 保存 / 删除 ----
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("💾 保存此配置", use_container_width=True):
+            st.session_state._show_save_input = True
+    with c2:
+        if selected_name != "（不使用已保存配置）" and st.button("🗑️ 删除选中", use_container_width=True):
+            del st.session_state.saved_configs[selected_name]
+            st.markdown(_write_local_storage_js(st.session_state.saved_configs), unsafe_allow_html=True)
+            st.rerun()
+
+    if st.session_state.get("_show_save_input"):
+        save_name = st.text_input("给配置起个名字", key="save_name_input",
+                                  placeholder="例如：通义千问 / OpenAI / DeepSeek")
+        if save_name:
+            st.session_state.saved_configs[save_name] = {
+                "provider": provider, "api_key": api_key,
+                "model_name": model_name, "base_url": base_url,
+            }
+            st.markdown(_write_local_storage_js(st.session_state.saved_configs), unsafe_allow_html=True)
+            st.success(f"已保存：{save_name}")
+            st.session_state._show_save_input = False
+            st.rerun()
+
+    # 导出 / 导入
+    c3, c4 = st.columns(2)
+    with c3:
+        st.download_button(
+            "📤 导出配置",
+            data=json.dumps(st.session_state.saved_configs, ensure_ascii=False, indent=2),
+            file_name="model_configs.json",
+            mime="application/json",
+            use_container_width=True,
+            disabled=len(st.session_state.saved_configs) == 0,
+        )
+    with c4:
+        uploaded = st.file_uploader("📥 导入", type=["json"], label_visibility="collapsed")
+        if uploaded is not None:
+            try:
+                imported = json.load(uploaded)
+                st.session_state.saved_configs.update(imported)
+                st.markdown(_write_local_storage_js(st.session_state.saved_configs), unsafe_allow_html=True)
+                st.success(f"已导入 {len(imported)} 个配置")
+                st.rerun()
+            except Exception as e:
+                st.error(f"导入失败：{e}")
+
     st.divider()
-    st.caption("提示：默认配置已预置，可直接提问；也可修改为你自己的 Token / 模型。")
+    st.caption("提示：保存的配置存在浏览器本地，不上传服务器；换设备请用导出/导入 JSON。")
     if st.button("🗑️ 清空对话"):
         st.session_state.messages = []
-        import uuid
-        st.session_state.thread_id = f"web-{uuid.uuid4().hex[:8]}"
+        st.session_state.thread_id = f"web-{_uuid.uuid4().hex[:8]}"
 
 # ---------------- 主区：聊天界面 ----------------
 st.title("📚 智能知识助手")
