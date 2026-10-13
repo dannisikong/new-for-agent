@@ -1,0 +1,54 @@
+<h1>差距分析（高频问题对照）</h1>
+<p>基于高频 Agent 工程问题对照项目现状，识别 Runtime / 质量 / 工程三类缺口，作为待办清单的依据。</p>
+<h2>项目现状（已核对代码）</h2>
+<table>
+<colgroup><col width="220"/><col width="600"/></colgroup>
+<thead><tr><th><p>能力</p></th><th><p>现状</p></th></tr></thead>
+<tbody>
+<tr><td><p>检索</p></td><td><p>BM25 单路关键词检索（top_k 固定），语义类问题召回弱</p></td></tr>
+<tr><td><p>检索闭环</p></td><td><p>Agentic RAG：评分 → 不相关重写 query → 再检（上限 2 轮），已实现</p></td></tr>
+<tr><td><p>输出稳定</p></td><td><p>temperature=0 + 进程内查询缓存，属过渡方案，进程重启即失效</p></td></tr>
+<tr><td><p>可观测</p></td><td><p>Web UI 展示每步轨迹雏形，无结构化 trace 落盘、无 bad case 记录</p></td></tr>
+<tr><td><p>其他</p></td><td><p>工具重试 0 处、长文本压缩 0 处、checkpoint 无、长期记忆无</p></td></tr>
+</tbody>
+</table>
+<h2>P0 · Runtime 完整性（决定像不像生产系统）</h2>
+<table>
+<colgroup><col width="260"/><col width="560"/></colgroup>
+<thead><tr><th><p>缺口</p></th><th><p>说明</p></th></tr></thead>
+<tbody>
+<tr><td><p>真 Checkpointer（SqliteSaver）</p></td><td><p>替代进程内缓存，支持断点恢复与跨轮次会话记忆</p></td></tr>
+<tr><td><p>工具调用重试幂等</p></td><td><p>检索失败 / 超时自动重试 + 幂等保护，避免重复副作用</p></td></tr>
+<tr><td><p>Guardrails</p></td><td><p>输入输出校验、prompt 注入防护</p></td></tr>
+<tr><td><p>长返回压缩策略</p></td><td><p>工具返回过长时摘要压缩 + 保留来源标记，避免全文塞爆上下文</p></td></tr>
+</tbody>
+</table>
+<h2>P1 · 质量可量化（决定回答质量怎么证明）</h2>
+<table>
+<colgroup><col width="260"/><col width="560"/></colgroup>
+<thead><tr><th><p>缺口</p></th><th><p>说明</p></th></tr></thead>
+<tbody>
+<tr><td><p>离线回归评测集</p></td><td><p>20–30 条标准问法 + 标准答案，每次改策略都全量跑一遍</p></td></tr>
+<tr><td><p>忠实度检查</p></td><td><p>回答的关键陈述能否在召回片段里找到依据，量化幻觉率</p></td></tr>
+<tr><td><p>向量检索 + RRF 混合召回</p></td><td><p>补 BM25 的语义召回短板，直接改善"检索太低智"问题</p></td></tr>
+<tr><td><p>Trace 结构化落盘 + bad case 收集</p></td><td><p>每步输入输出完整记录，支撑问题定位与归因</p></td></tr>
+</tbody>
+</table>
+<h2>P2 · 工程加分</h2>
+<table>
+<colgroup><col width="260"/><col width="560"/></colgroup>
+<thead><tr><th><p>缺口</p></th><th><p>说明</p></th></tr></thead>
+<tbody>
+<tr><td><p>Store 长期记忆</p></td><td><p>跨会话偏好沉淀，命名空间 + key 组织</p></td></tr>
+<tr><td><p>知识库增量更新</p></td><td><p>文档版本哈希，局部修改只重建受影响 chunk</p></td></tr>
+<tr><td><p>人在回路确认</p></td><td><p>LangGraph interrupt，关键输出挂人工确认后再推进</p></td></tr>
+<tr><td><p>成本 / 延迟统计</p></td><td><p>每次问答 token 消耗与耗时可视化</p></td></tr>
+</tbody>
+</table>
+<h2>暂不做（避免过度工程）</h2>
+<ul>
+<li>Coding Agent 代码定位 / 跨语言解析：属 Coding Agent 岗位方向，本项目为知识问答 Agent，了解概念即可</li>
+<li>自建模型网关：个人项目成本高，理解其路由 / 计费 / Prompt Cache 作用即可</li>
+<li>PRD / TD Agent 设计：与本项目方向不匹配</li>
+</ul>
+<callout emoji="🎯" background-color="light-gray"><p>建议起步顺序：先做 P0 的 Checkpointer + P1 的向量检索——前者补 Runtime 短板，后者直接解决检索质量问题；两者做完，项目即可从 demo 迈到"能讲生产设计"。</p></callout>

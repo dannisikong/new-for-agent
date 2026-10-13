@@ -1,0 +1,13 @@
+<h2>P0 · Harness 层（Runtime 完整性）</h2>
+<checkbox done="false"><b>Checkpointer 断点恢复 + 多轮会话记忆</b>：真 checkpoint（替代查询缓存），State / Reducer / Checkpointer 配合，实现断点恢复与跨轮次会话记忆</checkbox>
+<checkbox done="false"><b>工具调用重试幂等</b>：失败自动重试 + 幂等保护，避免重复调用产生副作用</checkbox>
+<checkbox done="false"><b>Guardrails</b>：输入 / 输出校验、防注入，守住调用边界</checkbox>
+<h2>P1 · 评测 + 多 Agent</h2>
+<checkbox done="false"><b>评测机制</b>：eval harness（离线回归集）+ LLM-as-Judge 评分（任务成功率、检索准确率、幻觉率）</checkbox>
+<checkbox done="false"><b>多 Agent</b>：supervisor / worker 按需委派 + context isolation，特定场景才拆、不滥用</checkbox>
+<h2>P2 · 自进化与配套</h2>
+<checkbox done="false"><b>bad case 记录闭环</b>：点踩 → Query 改写 → 失败归因 → 回归验证</checkbox>
+<checkbox done="false"><b>Store 长期记忆</b>：跨会话偏好沉淀（命名空间 + key）</checkbox>
+<checkbox done="false"><b>向量检索升级</b>：embedding + RRF 混合召回</checkbox>
+<checkbox done="false"><b>新知识空间 4 篇文档纳入检索语料</b>：把「LangGraph 官方文档学习」01–04 篇加入 docs/ 快照</checkbox>
+<checkbox done="false"><b>量化指标</b>：成本 / 延迟统计展示</checkbox>

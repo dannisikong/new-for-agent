@@ -10,8 +10,16 @@ agentic_rag.py —— Agentic RAG 闭环（知识库智能问答）
 真实模式用 LLM 实现（用户填入 Token / 模型后自动切换）。
 """
 
+import os
 import re
+import time
+import uuid
+import subprocess
 from typing import TypedDict, Annotated
+
+# LangSmith 可观测性配置（API key 从环境变量读取，不硬编码）
+os.environ.setdefault("LANGSMITH_TRACING", "true")
+os.environ.setdefault("LANGSMITH_PROJECT", "new-for-agent")
 
 import jieba
 import jieba.posseg as pseg
@@ -22,6 +30,38 @@ from langgraph.types import interrupt
 
 from knowledge_retriever import hybrid_search
 from tools import web_search as _web_search_tool
+
+# 飞书多维表格日志配置
+_LARK_BASE_TOKEN = "MqOEbCudzaX3BJse04wcY13qn5b"
+_LARK_TABLE_ID = "tbltCqeEor5PxBdP"
+
+
+def _log_to_lark(record: dict):
+    """把一轮问答记录写入飞书多维表格，失败不影响主流程。"""
+    try:
+        import json
+        fields = {
+            "request_id": record.get("request_id", ""),
+            "问题": record.get("question", "")[:500],
+            "最终回答": record.get("answer", "")[:2000],
+            "召回文档数": record.get("doc_count", 0),
+            "召回文档标题": record.get("doc_titles", "")[:500],
+            "评分结果": [record.get("grade", "relevant")],
+            "重写次数": record.get("rewrites", 0),
+            "是否降级": [record.get("fallback", "正常")],
+            "总耗时ms": record.get("duration_ms", 0),
+            "trace": "\n".join(record.get("trace", []))[:2000],
+        }
+        cmd = [
+            "lark-cli", "base", "+record-upsert",
+            "--base-token", _LARK_BASE_TOKEN,
+            "--table-id", _LARK_TABLE_ID,
+            "--json", json.dumps(fields, ensure_ascii=False),
+            "--as", "user",
+        ]
+        subprocess.run(cmd, capture_output=True, timeout=10)
+    except Exception:
+        pass  # 日志失败不影响主流程
 
 # 多轮记忆 checkpointer：优先 Sqlite（持久化），未装包时降级 Memory（重启丢失）
 try:
@@ -244,8 +284,10 @@ def _llm_answer(model, question: str, docs: list, web: list | None = None,
         history_block = "\n\n最近对话历史：\n" + "\n".join(lines)
     prompt = (
         "你是知识库问答助手。按以下规则回答：\n"
-        "1. 以检索片段为主要依据回答，不要编造片段里完全没有的事实\n"
-        "2. 片段里有相关内容但不完整时，基于已有内容尽量回答，不要说「没找到」\n"
+        "1. **先判断证据是否充分**：仔细阅读检索片段，判断这些内容是否足以准确回答用户问题。\n"
+        "   - 如果片段完全不相关、或只有一点点沾边但无法支撑完整回答 → 直接拒答，不要用自己的知识编造。\n"
+        "   - 如果片段足够回答 → 基于片段内容回答，不要加入片段里没有的事实。\n"
+        "2. 拒答话术：「抱歉，知识库中没有找到关于该问题的足够资料，我无法基于现有内容准确回答。你可以换个问法试试。」\n"
         "3. 先回答问题本身，问什么答什么，不要绕弯子\n"
         "4. 对比类问题：分点列出 A 和 B 的区别\n"
         "5. 操作类问题：列出具体步骤\n"
@@ -428,6 +470,7 @@ def rag_query(question: str, model=None, use_cache: bool = True,
                 "cached": True,
             }
     graph = build_rag_graph(model)
+    _start = time.time()
     out = graph.invoke(
         {
             "messages": [HumanMessage(content=question)],  # 本轮问题，reducer 自动 append
@@ -437,6 +480,27 @@ def rag_query(question: str, model=None, use_cache: bool = True,
         },
         config={"configurable": {"thread_id": thread_id}},
     )
+    _duration = int((time.time() - _start) * 1000)
+
+    # 写入飞书日志
+    _docs = out.get("retrieved") or []
+    _doc_titles = "、".join(d.get("doc_title", "") for d in _docs[:5])
+    _fallback = "web搜索" if out.get("web") else "正常"
+    if "模型暂不可用" in out.get("answer", ""):
+        _fallback = "模型异常"
+    _log_to_lark({
+        "request_id": str(uuid.uuid4())[:8],
+        "question": question,
+        "answer": out.get("answer", ""),
+        "doc_count": len(_docs),
+        "doc_titles": _doc_titles,
+        "grade": out.get("grade", "relevant"),
+        "rewrites": out.get("rewrites", 0),
+        "fallback": _fallback,
+        "duration_ms": _duration,
+        "trace": out.get("trace", []),
+    })
+
     _cache_store(question, out["answer"], out["trace"])
     return {"answer": out["answer"], "trace": out["trace"], "cached": False}
 

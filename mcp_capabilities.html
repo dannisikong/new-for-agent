@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="use-iframe" content="true">
+<meta name="html-box-height-mode" content="auto">
+<meta name="description" content="MCP 四种能力关系图">
+<style>
+body { font-family: -apple-system, sans-serif; padding: 20px; background: #fafafa; }
+.container { max-width: 700px; margin: 0 auto; }
+h2 { text-align: center; color: #333; }
+.row { display: flex; gap: 12px; margin: 16px 0; }
+.card { flex: 1; padding: 14px; border-radius: 10px; color: white; font-size: 13px; }
+.card h3 { margin: 0 0 8px 0; font-size: 15px; }
+.card p { margin: 4px 0; font-size: 12px; opacity: 0.95; }
+.tools { background: #e74c3c; }
+.resources { background: #3498db; }
+.prompts { background: #2ecc71; }
+.sampling { background: #9b59b6; }
+.flow { background: #fff; border: 2px dashed #999; border-radius: 10px; padding: 16px; margin: 16px 0; font-size: 13px; }
+.flow-step { display: inline-block; background: #333; color: white; padding: 4px 10px; border-radius: 14px; margin: 4px; font-size: 12px; }
+.arrow { color: #666; margin: 0 4px; }
+.legend { font-size: 12px; color: #666; text-align: center; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+<h2>MCP 四种能力：谁控制谁</h2>
+<div class="row">
+  <div class="card tools">
+    <h3>🔧 Tools 工具</h3>
+    <p>谁控制：<b>模型</b></p>
+    <p>干什么：执行动作</p>
+    <p>有副作用：⚠️</p>
+    <p>要批准：是</p>
+  </div>
+  <div class="card resources">
+    <h3>📄 Resources 资源</h3>
+    <p>谁控制：<b>应用</b></p>
+    <p>干什么：读数据</p>
+    <p>有副作用：无</p>
+    <p>要批准：否</p>
+  </div>
+</div>
+<div class="row">
+  <div class="card prompts">
+    <h3>💬 Prompts 模板</h3>
+    <p>谁控制：<b>用户</b></p>
+    <p>干什么：选工作流</p>
+    <p>有副作用：无</p>
+    <p>要批准：否</p>
+  </div>
+  <div class="card sampling">
+    <h3>🔄 Sampling 采样</h3>
+    <p>谁控制：<b>Server</b></p>
+    <p>干什么：反调 LLM</p>
+    <p>有副作用：间接</p>
+    <p>要批准：是</p>
+  </div>
+</div>
+<div class="flow">
+<b>一次完整协作流程：</b><br>
+<span class="flow-step">1. 用户选 Prompt</span> <span class="arrow">→</span>
+<span class="flow-step">2. Resources 取数据</span> <span class="arrow">→</span>
+<span class="flow-step">3. 模型调 Tools 执行</span> <span class="arrow">→</span>
+<span class="flow-step">4. Server 用 Sampling 补 LLM</span>
+</div>
+<div class="legend">💡 类比：Tools 是"动手做事"，Resources 是"翻资料"，Prompts 是"选剧本"，Sampling 是"Server 反向请 AI 帮忙"</div>
+</div>
+</body>
+</html>

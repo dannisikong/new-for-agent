@@ -1,0 +1,29 @@
+<title>AI Agent 项目开发纪要（new-for-agent）</title>
+<h1>项目概况</h1>
+<p>本纪要追踪 <b>new-for-agent</b>（LangGraph 实战项目）的开发进度与待办事项。待办方向依据「程序员峰哥」币安远程办公 AI Agent 三面面经中的考点整理，目标是补齐生产系统整合能力（LLM、检索、记忆、多代理、图数据库）。</p>
+
+<h1>已完成事项</h1>
+<checkbox done="true">LangGraph 官方文档系统学习：核心概念 / 持久化与记忆 / 多代理 / Agents 组件与平台，共 4 篇整理进独立知识空间（01–04）</checkbox>
+<checkbox done="true">AI Agent 课程知识库 22 篇导出为 docs/*.md，接入 BM25 中文关键词检索（knowledge_retriever.py）</checkbox>
+<checkbox done="true">Agentic RAG 闭环：检索 → 评分 → 不相关则重写问题 → 再检索（上限 2 轮）→ 回答（agentic_rag.py）</checkbox>
+<checkbox done="true">查询缓存：相同问题免重复检索、回答稳定；真实模式固定 temperature=0</checkbox>
+<checkbox done="true">Web 界面双模式（标准 ReAct / 知识库智能问答）+ 轨迹展示，已部署 Streamlit 并实测通过</checkbox>
+<checkbox done="true">GitHub 公开仓库发布（github.com/dannisikong/new-for-agent）</checkbox>
+
+<h1>待办事项</h1>
+<h2>P0 · 高优先（面经第 9 题原题）</h2>
+<checkbox done="false"><b>Checkpointer 断点恢复 + 多轮会话记忆</b>：用 checkpointer 保存每一步状态，实现断点恢复（进程中断后继续）与跨轮次会话记忆；对应考点「State、Reducer、Checkpointer 怎么配合做断点恢复和多轮会话」</checkbox>
+
+<h2>P1 · 中优先</h2>
+<checkbox done="false"><b>向量检索升级（embedding + 混合召回）</b>：引入向量召回与 BM25 做 RRF 融合，提升语义匹配质量；对应面经第 10 题「向量召回」</checkbox>
+<checkbox done="false"><b>召回评估集</b>：建立一组带标准答案的测试问题，量化评估检索质量（命中率 / 相关度）；对应面经反问项「召回评估集」</checkbox>
+<checkbox done="false"><b>多代理系统实践 + 状态隔离</b>：实现主管-子代理结构（检索 / 代码 / 搜索代理），验证各代理状态隔离；对应面经要求「多 agent 状态隔离」</checkbox>
+
+<h2>P2 · 后续</h2>
+<checkbox done="false"><b>Store 长期记忆</b>：用 langgraph.store 做跨会话问答记忆（命名空间 + key），把查询缓存升级为持久化记忆；对应面经「记忆写读过期冲突」</checkbox>
+<checkbox done="false"><b>新知识空间 4 篇 LangGraph 文档纳入检索语料</b>：把「LangGraph 官方文档学习」01–04 篇加入 docs/ 快照</checkbox>
+<checkbox done="false"><b>线上幻觉率评估</b>：建立 LLM 回答与检索片段的忠实度检查；对应面经反问项「线上幻觉率」</checkbox>
+<checkbox done="false"><b>图数据库 Neo4j 学习储备</b>：实体 / 关系 / 属性建模、多跳查询与 Cypher 安全；对应面经第 10 题，属进阶方向</checkbox>
+
+<h1>方向来源</h1>
+<p>待办方向整理自「程序员峰哥」发布的《币安远程办公 AI Agent 三面全记录》面经（LangGraph State / Reducer / Checkpointer、图数据库建模、意图识别路由与降级、记忆写读过期冲突、召回评估集与多代理成本等考点）。</p>

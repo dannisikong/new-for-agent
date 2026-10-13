@@ -1,0 +1,11 @@
+{
+  "audience": "项目开发者本人（用户）",
+  "reader_task": "追踪 new-for-agent 项目开发进度，明确待办事项与优先级",
+  "genre_contract": "organization-collaboration",
+  "adapter": null,
+  "presentation_mode": "rich",
+  "visual_plan": {
+    "reason": "开发纪要以标题+清单为主：已完成事项用勾选清单呈现进度，待办事项按优先级分组的未勾选清单承载核心内容，无需图片/画板/HTML5 block，故 blocks 为空",
+    "blocks": []
+  }
+}

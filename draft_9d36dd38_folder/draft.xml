@@ -1,0 +1,141 @@
+<title>AI Agent 面试回答思路（new-for-agent 项目）</title>
+<h1>项目定位（电梯陈述）</h1>
+<p><b>一句话：</b>new-for-agent 是我从课程系统学起、用 LangGraph 从零搭到部署上线的知识问答 Agent，覆盖状态图编排、ReAct 循环、Agentic RAG 检索闭环和多模式 Web 界面，已开源并部署。</p>
+<p><b>故事线（被问"介绍下你的项目"时按这个顺序讲）：</b></p>
+<ol>
+<li>系统学 AI Agent 基础：Thought-Action-Observation 循环 → smolagents 与 LangGraph 两个框架对比 → 选定 LangGraph（要可控、可编排、可生产）。</li>
+<li>用 LangGraph 搭 MVP：StateGraph + ReAct 循环（assistant 节点调 tools 节点，条件边路由），完成邮件分拣、文档分析两个图。</li>
+<li>部署上线：Streamlit 做 Web UI，演示模式（规则引擎 Mock）+ 真实模式（用户自填 Token/模型），GitHub 开源。</li>
+<li>发现真问题：知识库回答"太低智"、同一问题每次答案漂移 → 从关键词 BM25 检索升级到 Agentic RAG 闭环（检索→评分→不相关则重写问题→再检索，上限 2 轮），加查询缓存固定输出。</li>
+<li>对照生产级 Agent 要求补齐 Runtime 完整性（见下面四个模块）。</li>
+</ol>
+<callout emoji="🎯" background-color="light-gray"><p><b>主线原则：</b>讲每个模块都按"已做什么 → 为什么这么设计 → 诚实说出过渡方案和待做项 → 反问面试官"。不装、不编，被问到没做过的就说"生产里用降级和人工兜底，这块我下一步计划是 X"。</p></callout>
+
+<h1>模块一：Harness 层（Runtime 设计）</h1>
+<h2>面试官会怎么问</h2>
+<ul>
+<li>你的 Agent 运行时怎么设计的？为什么不是 while 循环挂 Tool？</li>
+<li>Checkpoint 怎么做？断点恢复和多轮会话怎么实现？</li>
+<li>记忆怎么分层？上下文窗口不够了怎么办？</li>
+<li>工具调用失败怎么处理？幂等怎么保证？</li>
+<li>上下文工程具体做了什么？</li>
+</ul>
+<h2>我们项目的事实底盘</h2>
+<table>
+<colgroup><col width="200"/><col width="320"/><col width="300"/></colgroup>
+<thead><tr><th><p>能力点</p></th><th><p>项目现状</p></th><th><p>回答口径</p></th></tr></thead>
+<tbody>
+<tr><td><p><b>状态图编排</b></p></td><td><p>LangGraph StateGraph：State 用 TypedDict + add_messages reducer，节点是函数，边做条件路由</p></td><td><p>已做，重点讲为什么用状态图而不是 while 循环</p></td></tr>
+<tr><td><p><b>Checkpoint</b></p></td><td><p>目前用进程内查询缓存替代（temperature=0 + 缓存命中），真正的 checkpointer 是 P0 待办</p></td><td><p>诚实说：缓存是过渡方案，下一步上 SqliteSaver/MemorySaver</p></td></tr>
+<tr><td><p><b>记忆分层</b></p></td><td><p>当前只有短期消息列表；跨会话记忆（Store）在 P2 计划</p></td><td><p>能讲清分层概念：工作记忆 / 会话记忆 / 长期记忆</p></td></tr>
+<tr><td><p><b>重试幂等</b></p></td><td><p>P0 待办</p></td><td><p>讲思路：工具失败重试 + 幂等键（同一 query 不重复副作用）</p></td></tr>
+<tr><td><p><b>可观测性</b></p></td><td><p>Web UI 展示每步 Thought/Tool/观察轨迹</p></td><td><p>已做雏形，可接 Langfuse 讲 tracing 思路</p></td></tr>
+</tbody>
+</table>
+<h2>回答话术</h2>
+<p>"我刻意没有用裸 while 循环挂 Tool。while 循环的问题是流程不可控、不可视、不可恢复。我用 LangGraph 的 StateGraph：State 是一个 TypedDict，消息列表用 add_messages reducer 做合并；assistant 节点判断要不要调工具，条件边路由到 tools 节点再回到 assistant，形成 ReAct 循环。这样每个节点边界清晰、可以画成图、每步状态可持久化。"</p>
+<p>"Checkpoint 这块我目前用的是过渡方案：固定 temperature=0 加进程内查询缓存，先解决同一问题答案漂移。真正的 checkpointer 我排在 P0，计划用 SqliteSaver 持久化每一步 State，进程中断后能从最后一个 checkpoint 恢复，同时实现跨轮次会话记忆。"</p>
+<h2>被追问怎么接</h2>
+<ul>
+<li><b>"add_messages 这个 reducer 解决什么问题？"</b>：多个节点都要往消息列表写时，reducer 负责追加而不是覆盖，这就是 LangGraph 里 State 更新的合并机制。</li>
+<li><b>"上下文超长了怎么办？"</b>：三条路——消息截断/摘要压缩、按需检索（RAG 只塞相关片段）、把长历史存外部只取要点。我项目里走的是 RAG 路线。</li>
+<li><b>"checkpoint 存哪儿？"</b>：开发用 MemorySaver 内存态，生产用 SqliteSaver/PostgresSaver 持久化；跨进程恢复就靠它。</li>
+</ul>
+<h2>可以反问</h2>
+<ul>
+<li>你们线上 checkpoint 存在哪？长会话上下文压缩用什么策略？</li>
+</ul>
+
+<h1>模块二：多 Agent 协作</h1>
+<h2>面试官会怎么问</h2>
+<ul>
+<li>什么时候该拆多 Agent，什么时候单 Agent 就够？</li>
+<li>supervisor / worker 怎么设计？handoff 怎么转？</li>
+<li>多个 Agent 之间上下文怎么隔离？fan-out/fan-in 怎么做？</li>
+</ul>
+<h2>我们项目的事实底盘</h2>
+<table>
+<colgroup><col width="200"/><col width="320"/><col width="300"/></colgroup>
+<thead><tr><th><p>能力点</p></th><th><p>项目现状</p></th><th><p>回答口径</p></th></tr></thead>
+<tbody>
+<tr><td><p><b>单 Agent</b></p></td><td><p>当前是单 Agent + 工具集（检索/搜索/天气等），ReAct 循环</p></td><td><p>这是经过判断的：知识问答场景单 Agent 足够</p></td></tr>
+<tr><td><p><b>多 Agent</b></p></td><td><p>学过概念，P1 待做 supervisor/worker</p></td><td><p>讲清"何时拆"的判断标准，比硬拆更重要</p></td></tr>
+<tr><td><p><b>状态隔离</b></p></td><td><p>计划每个 subagent 独立 State 和消息列表</p></td><td><p>讲 context isolation：子 agent 不看父 agent 全部历史</p></td></tr>
+</tbody>
+</table>
+<h2>回答话术</h2>
+<p>"我不认为拆得越多越好。我的项目是知识问答，一个 supervisor Agent 挂检索/搜索几个工具就够了，拆多了反而增加协调成本和幻觉面。真要拆的场景是：子任务天然可并行（比如同时查三个知识库再汇总）、或者子任务需要独立的上下文和工具权限。那时候用 supervisor-worker：主管决定委派给谁、worker 独立 State 跑、结果 fan-in 回主管汇总，worker 之间默认 context isolation，只通过消息协议传递结果。"</p>
+<h2>被追问怎么接</h2>
+<ul>
+<li><b>"handoff 怎么实现？"</b>：LangGraph 里就是一条边从主管节点指向 worker 节点，主管把任务描述塞进 worker 的 State，worker 返回结果后再连回主管。</li>
+<li><b>"多 agent 冲突怎么消解？"</b>：主管单点决策收口，worker 不互相调用；冲突由主管仲裁，必要时升级人工。</li>
+</ul>
+<h2>可以反问</h2>
+<ul>
+<li>你们多 Agent 之间的消息协议怎么定？多 agent 一次任务的成本怎么控？</li>
+</ul>
+
+<h1>模块三：评测机制</h1>
+<h2>面试官会怎么问</h2>
+<ul>
+<li>你怎么衡量 Agent 输出质量？跑几个 case 就算完？</li>
+<li>LLM-as-a-Judge 怎么设计？怎么控制 Judge 自己的偏差？</li>
+<li>看哪些指标？</li>
+</ul>
+<h2>我们项目的事实底盘</h2>
+<table>
+<colgroup><col width="200"/><col width="320"/><col width="300"/></colgroup>
+<thead><tr><th><p>能力点</p></th><th><p>项目现状</p></th><th><p>回答口径</p></th></tr></thead>
+<tbody>
+<tr><td><p><b>检索质量</b></p></td><td><p>发现了"回答漂移"问题，加了缓存固定输出</p></td><td><p>问题意识是真的，评测体系是 P1 待建</p></td></tr>
+<tr><td><p><b>eval harness</b></p></td><td><p>计划建 20–30 条标准问法的离线回归集</p></td><td><p>讲清楚指标定义比"跑了"重要</p></td></tr>
+<tr><td><p><b>Judge</b></p></td><td><p>计划 LLM-as-Judge + Rubric 打分</p></td><td><p>讲 Judge 偏差控制：rubric 写明确、人工抽检</p></td></tr>
+</tbody>
+</table>
+<h2>回答话术</h2>
+<p>"我踩过这个坑：一开始觉得能回答就行，后来发现同一问题每次答案不一样，才意识到没有评测就不知道改好还是改坏了。我的计划是三层：第一，建一组带标准答案的离线回归问题，每次改 prompt 或改检索策略都跑一遍；第二，用 LLM-as-Judge 按 rubric 打分，看任务成功率、检索命中率、回答是不是被检索片段支撑（幻觉率）；第三，Judge 本身会有偏差，所以 rubric 要写得非常具体、定期人工抽检校准。"</p>
+<h2>被追问怎么接</h2>
+<ul>
+<li><b>"幻觉率怎么定义？"</b>：回答中的关键陈述能不能在检索回来的片段里找到依据，找不到就算幻觉。</li>
+<li><b>"成本指标呢？"</b>：每次问答的 token 消耗和延迟也记录，评测不只看质量也看成本。</li>
+</ul>
+<h2>可以反问</h2>
+<ul>
+<li>你们线上幻觉率怎么监控？Judge 偏差怎么校准？</li>
+</ul>
+
+<h1>模块四：自进化</h1>
+<h2>面试官会怎么问</h2>
+<ul>
+<li>用户反馈不好，你怎么持续优化？</li>
+<li>bad case 怎么处理？改 prompt 打补丁吗？</li>
+<li>失败轨迹怎么沉淀？</li>
+</ul>
+<h2>我们项目的事实底盘</h2>
+<table>
+<colgroup><col width="200"/><col width="320"/><col width="300"/></colgroup>
+<thead><tr><th><p>能力点</p></th><th><p>项目现状</p></th><th><p>回答口径</p></th></tr></thead>
+<tbody>
+<tr><td><p><b>Query 改写</b></p></td><td><p>Agentic RAG 闭环里已有：检索不相关就重写问题再检</p></td><td><p>这就是自进化的雏形，能讲</p></td></tr>
+<tr><td><p><b>bad case 闭环</b></p></td><td><p>P2 待做：点踩记录 → 聚类 → 归因 → 回归验证</p></td><td><p>讲完整闭环思路</p></td></tr>
+<tr><td><p><b>记忆沉淀</b></p></td><td><p>计划 langgraph.store 长期记忆存用户偏好</p></td><td><p>讲命名空间 + key 的组织方式</p></td></tr>
+</tbody>
+</table>
+<h2>回答话术</h2>
+<p>"我反对改 prompt 打补丁式优化。正确闭环是：用户点踩或答错 → 记录这条 query、当时的回答和完整轨迹 → 攒一批后做 bad case 聚类，看哪类问题集中出错 → 归因：是检索没召回（补语料/换 embedding）、工具路由错（改路由规则）、还是 prompt 不明确 → 改完必须回到离线回归集验证，防止改一个坏三个。我的 Agentic RAG 里'检索不相关就重写问题再检'其实就是这个思想的雏形。"</p>
+<h2>可以反问</h2>
+<ul>
+<li>你们 bad case 迭代频率多高？怎么防止改一处坏三处？</li>
+</ul>
+
+<h1>通用策略</h1>
+<h2>不会的点怎么答</h2>
+<p>不会就说不会，补一句"生产里这种情况我会用降级策略兜住，比如工具超时就直接告诉用户'我暂时查不到'，而不是硬编一个答案"。比瞎吹强得多。</p>
+<h2>把节奏拉回来</h2>
+<p>被问到特别难、自己没做深的点，答完基础部分后反手三个问题：<b>你们的召回评估集怎么建的？线上幻觉率怎么监控？多 agent 的成本怎么算？</b>——把对话从"考我"变成"互相交流生产经验"。</p>
+<h2>红线</h2>
+<ul>
+<li>不背名词堆砌（"三层记忆""MCP/A2A"），每个词都要接一个我们项目里的具体做法。</li>
+<li>诚实区分已做 / 过渡 / 待做——过渡方案（查询缓存代替 checkpoint）主动说，比被问穿了强。</li>
+<li>技术细节能落到代码层级：State 是 TypedDict、reducer 是 add_messages、边是条件路由。</li>
+</ul>

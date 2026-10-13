@@ -1,0 +1,24 @@
+<h1>开发历程回顾</h1>
+<p>从零学习 AI Agent 基础知识，到选定 LangGraph 框架实现 MVP 智能体，再到接入知识检索、Agentic RAG 与缓存逐步完善上线。全过程按阶段记录如下。</p>
+<h2>阶段一 · AI Agent 基础知识学习</h2>
+<ul>
+<li>以任务模式逐篇学习 Hugging Face Agents 课程：Tools 工具、Thought-Action-Observation（思考-行动-观察）循环、CoT 与 ReAct、多框架对比等核心概念。</li>
+<li>每篇产出「核心知识点总结 + 形象化图片卡片」，图片作为文档头图写入飞书知识库。</li>
+<li>沉淀「AI Agent 学习知识库」共 22 篇（01–22），形成"内容详细 + 对新人有好的形式"的固定风格。</li>
+</ul>
+<h2>阶段二 · LangGraph 框架学习与 MVP 实现</h2>
+<ul>
+<li>确定使用 LangGraph 框架；通读官方文档全站 130+ 页，按核心概念、代理开发、平台云、实战教程四批系统学习。</li>
+<li>学习成果总结为 4 篇，独立整理进新知识空间「LangGraph 官方文档学习」（01–04，编号重置）。</li>
+<li>沙箱无真实 LLM API Key，用规则型模拟 LLM（MockAlfredLLM，兼容 Runnable）实现 4 个可运行项目：邮件分拣、人工审阅（interrupt / Command）、舞会智能体（ReAct 循环 + 工具）、一行版 create_react_agent 对比。</li>
+<li>发布 GitHub 公开仓库 github.com/dannisikong/new-for-agent（建仓踩坑：fine-grained 令牌失败、classic 缺 read:org，最终 curl REST 建仓成功）。</li>
+<li>加 Streamlit 前端（可自定义 Token / 模型），上线 https://new-for-agent.streamlit.app/（入口文件踩坑：无法在线修改，只能删除重建，入口必须 app_web.py）。</li>
+</ul>
+<h2>阶段三 · 知识检索与智能问答完善</h2>
+<ul>
+<li>22 篇知识库导出 docs/*.md 快照，jieba 分词 + BM25 关键词检索，注册为智能体第 5 个工具（knowledge_search）。</li>
+<li>移植官方 tutorial_rag 的 Agentic RAG 闭环：检索 → 评分 → 不相关则重写（上限 2 轮）→ 回答，演示 / 真实双模式。</li>
+<li>加查询缓存：相同问题免重复检索、回答稳定；真实模式固定 temperature=0。</li>
+</ul>
+<h2>阶段四 · 面经对照与后续方向（当前）</h2>
+<p>解读「币安远程办公 AI Agent 三面」面经，输出 7 项考点 × 项目掌握度对照。差距集中在 Checkpointer 断点恢复、向量检索 + 召回评估、多代理状态隔离三个生产化方向，已落为上文待办清单（P0 / P1 / P2）。</p>
