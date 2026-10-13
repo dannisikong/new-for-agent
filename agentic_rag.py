@@ -272,6 +272,23 @@ def _llm_rewrite(model, question: str, docs: list) -> str:
         return question  # 降级：用原问题再试一次
 
 
+def _llm_expand_query(model, question: str) -> str:
+    """检索前：把用户问题扩展成包含关键词的搜索词，提升 BM25 命中率。"""
+    prompt = (
+        "你是检索词扩展助手。把用户的问题改写成更适合知识库检索的关键词组合。\n"
+        "要求：\n"
+        "1. 保留问题核心意思\n"
+        "2. 补充问题里提到的概念对应的专业术语或英文关键词\n"
+        "3. 只输出扩展后的检索词，用空格分隔，不要解释\n\n"
+        f"用户问题：{question}\n\n扩展检索词："
+    )
+    try:
+        resp = model.invoke([HumanMessage(content=prompt)])
+        return str(resp.content).strip()[:120] or question
+    except Exception:
+        return question  # 降级：用原问题检索
+
+
 def _llm_answer(model, question: str, docs: list, web: list | None = None,
                 history: list | None = None) -> str:
     web_block = f"\n\n网络搜索补充：\n{web[0]}" if web else ""
@@ -331,6 +348,15 @@ def build_rag_graph(model=None, human_review: bool = True):
         if result == "blocked":
             return {"grade": "blocked", "trace": trace}
         return {"grade": "todo", "trace": trace}
+
+    def rewrite_query(state: RAGState):
+        """检索前：用 LLM 扩展关键词，提升 BM25 首次命中率。"""
+        question = state["question"]
+        if not use_llm:
+            return {}  # 演示模式不扩展
+        expanded = _llm_expand_query(model, question)
+        trace = list(state.get("trace") or []) + [f"🔤 扩展检索词：{question} → {expanded}"]
+        return {"question": expanded, "trace": trace}
 
     def retrieve(state: RAGState):
         question = state["question"]
@@ -412,7 +438,7 @@ def build_rag_graph(model=None, human_review: bool = True):
     def route_after_decide(state: RAGState):
         if state.get("grade") == "blocked":
             return "answer"
-        return "retrieve"
+        return "rewrite_query"
 
     def route_after_retrieve(state: RAGState):
         # 知识库无召回 → 直接降级网络搜索
@@ -427,6 +453,7 @@ def build_rag_graph(model=None, human_review: bool = True):
 
     builder = StateGraph(RAGState)
     builder.add_node("decide", decide)
+    builder.add_node("rewrite_query", rewrite_query)
     builder.add_node("retrieve", retrieve)
     builder.add_node("grade", grade)
     builder.add_node("rewrite", rewrite)
@@ -435,6 +462,7 @@ def build_rag_graph(model=None, human_review: bool = True):
     builder.add_node("answer", answer)
 
     builder.add_edge(START, "decide")
+    builder.add_edge("rewrite_query", "retrieve")
     builder.add_conditional_edges("decide", route_after_decide,
                                   {"retrieve": "retrieve", "answer": "answer"})
     builder.add_conditional_edges("retrieve", route_after_retrieve,
