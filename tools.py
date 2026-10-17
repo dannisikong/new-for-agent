@@ -190,3 +190,7 @@ def knowledge_search(query: str) -> str:
 
 # 统一工具列表（对应课程 tools=[...]）
 TOOLS = [guest_info_retriever, web_search, weather_info, hub_stats, knowledge_search]
+
+# 工具名白名单：模型幻觉调用不存在的工具时，用于前置校验
+TOOL_NAMES = {t.name for t in TOOLS}
+TOOL_DESCRIPTIONS = {t.name: t.description for t in TOOLS}

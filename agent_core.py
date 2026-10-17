@@ -10,13 +10,13 @@ agent_core.py —— 可复用后端核心（供 Streamlit Web UI 调用）
 
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import AnyMessage
+from langchain_core.messages import AnyMessage, ToolMessage, HumanMessage
 from langchain_core.runnables import Runnable
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from tools import TOOLS
+from tools import TOOLS, TOOL_NAMES, TOOL_DESCRIPTIONS
 from app import MockAlfredLLM
 from knowledge_retriever import EmbeddingClient, set_embedding_client
 from agentic_rag import _memory  # 复用同一个 checkpointer（Sqlite/Memory 自动降级）
@@ -82,6 +82,45 @@ class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 
+def _safe_tool_node(state: AgentState):
+    """安全工具分发：先校验工具名白名单，幻觉调用不存在的工具时
+    返回错误消息列出可用工具，让 LLM 纠正重试，而不是直接抛异常。"""
+    last_msg = state["messages"][-1]
+    tool_calls = getattr(last_msg, "tool_calls", None) or []
+
+    # 建立工具名 → 工具实例映射
+    tool_map = {t.name: t for t in TOOLS}
+    results = []
+
+    for tc in tool_calls:
+        name = tc.get("name", "")
+        call_id = tc.get("id", "")
+        args = tc.get("args", {})
+
+        # 白名单校验：模型幻觉调用了不存在的工具
+        if name not in TOOL_NAMES:
+            available = "、".join(sorted(TOOL_NAMES))
+            results.append(ToolMessage(
+                content=f"❌ 工具「{name}」不存在。可用工具：{available}。"
+                        f"请从上面选择正确的工具名重试，不要编造工具。",
+                tool_call_id=call_id,
+            ))
+            continue
+
+        # 工具名合法，正常执行
+        try:
+            result = tool_map[name].invoke(args)
+            results.append(ToolMessage(content=str(result), tool_call_id=call_id))
+        except Exception as e:
+            results.append(ToolMessage(
+                content=f"⚠️ 工具「{name}」执行失败：{e.__class__.__name__}: {e}。"
+                        f"请检查参数后重试，或换用其他工具。",
+                tool_call_id=call_id,
+            ))
+
+    return {"messages": results}
+
+
 def build_react_graph(model: Runnable):
     """构建 assistant ↔ tools 的 ReAct 循环图"""
 
@@ -91,7 +130,7 @@ def build_react_graph(model: Runnable):
 
     builder = StateGraph(AgentState)
     builder.add_node("assistant", assistant)
-    builder.add_node("tools", ToolNode(TOOLS))
+    builder.add_node("tools", _safe_tool_node)
     builder.add_edge(START, "assistant")
     builder.add_conditional_edges("assistant", tools_condition)
     builder.add_edge("tools", "assistant")

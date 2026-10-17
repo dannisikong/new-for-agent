@@ -65,10 +65,20 @@ def run_one(rag_graph, llm, item: dict) -> dict:
     m = re.match(r"(\d+)-", expected_doc)
     expected_num = m.group(1) if m else ""
     # retrieved title 格式："<title>01 · Agent（智能体）</title>"
-    hit_recall = any(
-        expected_num in re.findall(r"(\d+)\s*[·.•]", t) or expected_num in t.split()[0]
-        for t in retrieved_titles
-    )
+    retrieved_titles = [d.get("doc_title", "") for d in retrieved]
+
+    # 找正确文档排第几名（从 1 开始数）
+    correct_rank = 0  # 0 = 没命中
+    for i, t in enumerate(retrieved_titles):
+        nums_in_title = re.findall(r"(\d+)\s*[·.•]", t)
+        first_num = t.split()[0] if t.split() else ""
+        if expected_num in nums_in_title or expected_num in first_num:
+            correct_rank = i + 1
+            break
+
+    hit_recall = correct_rank > 0
+    # MRR 贡献：排第 1 得 1.0，排第 2 得 0.5，排第 5 得 0.2，没命中得 0
+    mrr_score = 1.0 / correct_rank if correct_rank > 0 else 0.0
 
     # 2. LLM-as-Judge 打分
     judge_input = JUDGE_PROMPT.format(
@@ -94,6 +104,8 @@ def run_one(rag_graph, llm, item: dict) -> dict:
         "type": item["type"],
         "expected_doc": expected_doc,
         "recall_hit": hit_recall,
+        "correct_rank": correct_rank,
+        "mrr_score": round(mrr_score, 3),
         "retrieved_titles": retrieved_titles[:3],
         "answer_score": judge.get("score", 0),
         "covered": judge.get("covered", []),
@@ -135,9 +147,15 @@ def main():
     recall_rate = sum(1 for r in results if r["recall_hit"]) / n
     avg_score = sum(r["answer_score"] for r in results) / n
     halluc_rate = sum(1 for r in results if r["hallucination"]) / n
+    mrr = sum(r["mrr_score"] for r in results) / n  # Mean Reciprocal Rank
+
+    # 排第 1 的比例（精确率 top1）
+    top1_rate = sum(1 for r in results if r["correct_rank"] == 1) / n
 
     print(f"总问题数：{n}")
     print(f"召回准确率：{recall_rate:.0%}（{sum(1 for r in results if r['recall_hit'])}/{n}）")
+    print(f"MRR（平均倒数排名）：{mrr:.3f}")
+    print(f"Top1 精确率：{top1_rate:.0%}（正确答案排第1的比例）")
     print(f"平均回答分：{avg_score:.2f}/5")
     print(f"幻觉率：{halluc_rate:.0%}（{sum(1 for r in results if r['hallucination'])}/{n}）")
 

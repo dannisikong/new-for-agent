@@ -15,6 +15,7 @@ import re
 import time
 import uuid
 import subprocess
+from collections import OrderedDict
 from typing import TypedDict, Annotated
 
 # LangSmith 可观测性配置（API key 从环境变量读取，不硬编码）
@@ -81,8 +82,9 @@ MAX_REWRITES = 2
 TOP_K = 3
 
 # 查询缓存：规范化问题 → {answer, trace, hits}
-# 相同问题直接复用上次检索结果，避免重复检索（无状态图 → 带记忆）
-_answer_cache: dict[str, dict] = {}
+# LRU 淘汰：容量上限 100 条，超过淘汰最久未访问的，避免内存无限增长
+CACHE_CAPACITY = 100
+_answer_cache: OrderedDict[str, dict] = OrderedDict()
 
 
 def _norm_question(question: str) -> str:
@@ -91,17 +93,26 @@ def _norm_question(question: str) -> str:
 
 def _cache_hit(question: str) -> dict | None:
     key = _norm_question(question)
-    return _answer_cache.get(key)
+    if key in _answer_cache:
+        # LRU：访问过就移到末尾（标记为最近使用）
+        _answer_cache.move_to_end(key)
+        return _answer_cache[key]
+    return None
 
 
 def _cache_store(question: str, answer: str, trace: list):
-    _answer_cache[_norm_question(question)] = {
+    key = _norm_question(question)
+    _answer_cache[key] = {
         "answer": answer, "trace": trace, "hits": 1,
     }
+    _answer_cache.move_to_end(key)
+    # 超容量淘汰最久未使用的（OrderedDict 头部）
+    while len(_answer_cache) > CACHE_CAPACITY:
+        _answer_cache.popitem(last=False)
 
 
 def cache_stats() -> dict:
-    return {"cached_questions": len(_answer_cache)}
+    return {"cached_questions": len(_answer_cache), "capacity": CACHE_CAPACITY}
 
 
 # 知识库话题触发词（演示模式：决定是否进入检索）
@@ -289,16 +300,42 @@ def _llm_expand_query(model, question: str) -> str:
         return question  # 降级：用原问题检索
 
 
+RECENT_HISTORY_KEEP = 4  # 最近保留原文的消息条数（约 2 轮对话）
+
+
+def _summarize_old_history(model, old_messages: list) -> str:
+    """把更早的多轮对话压缩成一段摘要，控制上下文长度不无限膨胀。"""
+    lines = []
+    for m in old_messages:
+        role = "用户" if isinstance(m, HumanMessage) else "助手"
+        lines.append(f"{role}：{m.content[:200]}")
+    convo = "\n".join(lines)
+    prompt = (
+        "请把以下历史对话压缩成一段简短摘要（100字以内），保留讨论过的主题、"
+        "关键结论和用户关注点，省略客套话和重复内容。只输出摘要，不要解释。\n\n"
+        f"历史对话：\n{convo}\n\n摘要："
+    )
+    try:
+        resp = model.invoke([HumanMessage(content=prompt)])
+        return str(resp.content).strip()[:200]
+    except Exception:
+        # 摘要失败降级：直接截断，不让主流程卡死
+        return f"（更早对话共 {len(old_messages)} 条，已截断以控制上下文长度）"
+
+
 def _llm_answer(model, question: str, docs: list, web: list | None = None,
-                history: list | None = None) -> str:
+                history: list | None = None,
+                history_summary: str | None = None) -> str:
     web_block = f"\n\n网络搜索补充：\n{web[0]}" if web else ""
     history_block = ""
+    if history_summary:
+        history_block += f"\n\n📋 更早对话摘要：{history_summary}"
     if history:
         lines = []
         for m in history:
             role = "用户" if isinstance(m, HumanMessage) else "助手"
-            lines.append(f"{role}：{m.content}")
-        history_block = "\n\n最近对话历史：\n" + "\n".join(lines)
+            lines.append(f"{role}：{m.content[:300]}")
+        history_block += "\n\n最近对话历史：\n" + "\n".join(lines)
     prompt = (
         "你是知识库问答助手。按以下规则回答：\n"
         "1. **先判断证据是否充分**：仔细阅读检索片段，判断这些内容是否足以准确回答用户问题。\n"
@@ -361,7 +398,8 @@ def build_rag_graph(model=None, human_review: bool = True):
     def retrieve(state: RAGState):
         question = state["question"]
         try:
-            docs, source = hybrid_search(question, top_k=TOP_K)
+            # 真实模式下传 llm 做 rerank 精排；演示模式纯粗筛
+            docs, source = hybrid_search(question, top_k=TOP_K, llm=model if use_llm else None)
         except Exception as e:
             # L4: 知识库检索失败不拖垮整轮，降级为空 → 走 web 搜索
             docs, source = [], f"检索异常（{e.__class__.__name__}），降级网络"
@@ -425,8 +463,16 @@ def build_rag_graph(model=None, human_review: bool = True):
         if web and not use_llm:
             docs = []
         if use_llm:
-            history = state.get("messages", [])[-6:]
-            ans = _llm_answer(model, question, docs, web, history)
+            all_messages = state.get("messages", [])
+            # 上下文分层裁剪：最近 N 条保留原文，更早的 LLM 摘要压缩
+            history_summary = None
+            if len(all_messages) > RECENT_HISTORY_KEEP:
+                old = all_messages[:-RECENT_HISTORY_KEEP]
+                recent = all_messages[-RECENT_HISTORY_KEEP:]
+                history_summary = _summarize_old_history(model, old)
+            else:
+                recent = all_messages
+            ans = _llm_answer(model, question, docs, web, recent, history_summary)
         else:
             ans = _rule_answer(question, docs, state.get("rewrites", 0), web)
         # Guardrails 输出检查：防 system prompt 泄露

@@ -20,8 +20,9 @@ import jieba
 
 DOCS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
 TOP_K = 5
-RECALL_N = 10  # 每路召回数量（融合前）
+RECALL_N = 20  # 每路召回数量（粗筛阶段，多召回一些给 rerank 精排）
 RRF_K = 60     # RRF 常数（经验值）
+RERANK_TOP_N = 20  # 送入精排的候选数量（粗筛融合后取 top20 做 rerank）
 
 # jieba 初次加载会输出日志，静默处理
 jieba.setLogLevel(20)
@@ -240,33 +241,60 @@ def _get_vector_index() -> VectorIndex | None:
     return _vector_index
 
 
-def hybrid_search(query: str, top_k: int = TOP_K) -> tuple[list[dict], str]:
-    """统一检索入口：BM25 + 向量两路召回，RRF 融合。
-    返回 (结果列表, 召回方式说明)。无 embedding 配置时自动降级纯 BM25。"""
+def hybrid_search(query: str, top_k: int = TOP_K, llm=None) -> tuple[list[dict], str]:
+    """统一检索入口：BM25 + 向量两路召回，RRF 融合，（可选）LLM rerank 精排。
+
+    流程：
+      粗筛：BM25 top20 + 向量 top20 → RRF 融合 → top20 候选
+      精排：如果传了 llm，用 LLM 对 top20 打分重排 → top5
+
+    Args:
+        query: 用户问题
+        top_k: 最终保留的片段数
+        llm: 可选，用于 rerank 的 LLM 实例；不传则跳过精排直接返回粗筛结果
+
+    Returns:
+        (结果列表, 召回方式说明)
+    """
     bm25 = _get_index().search_raw(query, top_n=RECALL_N)
     vi = _get_vector_index()
     if vi is None:
-        picks = [(s, i) for s, i in bm25[:top_k]]
+        picks = [(s, i) for s, i in bm25[:RERANK_TOP_N]]
         source = "BM25 关键词"
     else:
         try:
             vec = vi.search_raw(query, top_n=RECALL_N)
-            picks = _rrf_fuse(bm25, vec, top_k=top_k)
+            picks = _rrf_fuse(bm25, vec, top_k=RERANK_TOP_N)
             source = "BM25 + 向量语义（RRF 融合）"
         except Exception as e:
             print(f"  [vector] 向量检索失败，降级 BM25：{e}")
-            picks = [(s, i) for s, i in bm25[:top_k]]
+            picks = [(s, i) for s, i in bm25[:RERANK_TOP_N]]
             source = "BM25 关键词（向量不可用降级）"
-    results = []
+
+    # 构造粗筛候选列表
+    candidates = []
     for rank, (score, i) in enumerate(picks):
         c = _get_index().chunks[i]
-        results.append({
+        candidates.append({
             "rank": rank,
             "score": round(score, 3),
             "doc_title": c["doc_title"],
             "section": c["section"],
             "text": c["text"][:500],
         })
+
+    # 精排：如果传了 LLM，做 rerank
+    if llm is not None and len(candidates) > top_k:
+        try:
+            from rerank import rerank_candidates
+            results = rerank_candidates(query, candidates, llm, top_k=top_k)
+            source += " + LLM Rerank 精排"
+        except Exception as e:
+            print(f"  [rerank] 精排失败，降级粗筛结果：{e}")
+            results = candidates[:top_k]
+    else:
+        results = candidates[:top_k]
+
     return results, source
 
 
