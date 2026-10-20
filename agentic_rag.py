@@ -31,6 +31,8 @@ from langgraph.types import interrupt
 
 from knowledge_retriever import hybrid_search
 from tools import web_search as _web_search_tool
+from tool_policy import validate as _validate_tool
+from audit_log import log_event as _audit
 
 # 飞书多维表格日志配置
 _LARK_BASE_TOKEN = "MqOEbCudzaX3BJse04wcY13qn5b"
@@ -426,20 +428,33 @@ def build_rag_graph(model=None, human_review: bool = True):
         trace = list(state["trace"]) + [f"✍️ 重写问题：{question} → {new_q}"]
         return {"question": new_q, "rewrites": state.get("rewrites", 0) + 1, "trace": trace}
 
-    def web_search_node(state: RAGState):
-        """知识库未命中/不相关：降级走网络搜索，结果并入回答"""
+    def web_search_node(state: RAGState, config=None):
+        """知识库未命中/不相关：降级走网络搜索，结果并入回答。
+        调用前先过参数级最小权限校验，越权参数（命令/本地路径）直接拒绝。"""
         question = state["question"]
+        thread_id = ((config or {}).get("configurable") or {}).get("thread_id", "default")
+        ok, reason = _validate_tool("web_search", {"query": question})
+        if not ok:
+            _audit("tool_denied", tool="web_search", thread_id=thread_id,
+                   args={"query": question}, ok=False, error=reason)
+            trace = list(state["trace"]) + [f"⛔ web_search 参数被最小权限策略拒绝：{reason}"]
+            return {"web": [], "trace": trace}
         try:
             result = _web_search_tool.invoke({"query": question})
+            _audit("tool_call", tool="web_search", thread_id=thread_id,
+                   args={"query": question}, ok=True, result_preview=result)
         except Exception as e:
             result = f"（网络搜索失败：{e.__class__.__name__}）"
+            _audit("tool_error", tool="web_search", thread_id=thread_id,
+                   args={"query": question}, ok=False, error=f"{e.__class__.__name__}: {e}")
         trace = list(state["trace"]) + ["🌐 知识库未命中，转网络搜索"]
         return {"web": [result], "trace": trace}
 
-    def confirm(state: RAGState):
+    def confirm(state: RAGState, config=None):
         """人在回路：检索到资料后暂停，等用户确认再生成回答。"""
         if not use_llm or not human_review:
             return {}  # 演示模式或评测模式不 interrupt
+        thread_id = ((config or {}).get("configurable") or {}).get("thread_id", "default")
         docs = state.get("retrieved") or []
         titles = [d.get("doc_title", "片段") for d in docs[:3]]
         choice = interrupt({
@@ -447,6 +462,8 @@ def build_rag_graph(model=None, human_review: bool = True):
             "question": state["question"],
             "docs": titles,
         })
+        _audit("human_review", thread_id=thread_id, ok=True,
+               extra={"choice": choice, "question": state["question"][:300]})
         trace = list(state["trace"]) + [f"👤 用户确认：{choice}"]
         return {"trace": trace}
 
@@ -510,7 +527,8 @@ def build_rag_graph(model=None, human_review: bool = True):
     builder.add_edge(START, "decide")
     builder.add_edge("rewrite_query", "retrieve")
     builder.add_conditional_edges("decide", route_after_decide,
-                                  {"retrieve": "retrieve", "answer": "answer"})
+                                  {"rewrite_query": "rewrite_query",
+                                   "retrieve": "retrieve", "answer": "answer"})
     builder.add_conditional_edges("retrieve", route_after_retrieve,
                                   {"grade": "grade", "web_search": "web_search"})
     builder.add_conditional_edges("grade", route_after_grade,
@@ -576,6 +594,22 @@ def rag_query(question: str, model=None, use_cache: bool = True,
     })
 
     _cache_store(question, out["answer"], out["trace"])
+
+    # 本地结构化审计：整轮问答汇总（与飞书业务日志、LangSmith trace 互补）
+    _audit(
+        "round",
+        thread_id=thread_id,
+        ok=out.get("grade") != "blocked",
+        extra={
+            "question": question[:300],
+            "grade": out.get("grade", ""),
+            "rewrites": out.get("rewrites", 0),
+            "web_fallback": bool(out.get("web")),
+            "doc_count": len(_docs),
+            "duration_ms": _duration,
+            "cached": False,
+        },
+    )
     return {"answer": out["answer"], "trace": out["trace"], "cached": False}
 
 

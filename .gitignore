@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+
+# 本地运行产物（审计日志 / 持久化 checkpoint / 密钥）
+logs/
+checkpoints.db
+.env

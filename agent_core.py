@@ -17,6 +17,8 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from tools import TOOLS, TOOL_NAMES, TOOL_DESCRIPTIONS
+from tool_policy import validate
+from audit_log import log_event
 from app import MockAlfredLLM
 from knowledge_retriever import EmbeddingClient, set_embedding_client
 from agentic_rag import _memory  # 复用同一个 checkpointer（Sqlite/Memory 自动降级）
@@ -82,12 +84,16 @@ class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 
-def _safe_tool_node(state: AgentState):
-    """安全工具分发：先校验工具名白名单，幻觉调用不存在的工具时
-    返回错误消息列出可用工具，让 LLM 纠正重试，而不是直接抛异常。"""
+def _safe_tool_node(state: AgentState, config=None):
+    """安全工具分发（三层防护）：
+    ① 工具名白名单：幻觉调用不存在的工具 → 返回错误列出可用工具让模型纠正；
+    ② 参数级最小权限：工具名合法但参数越权（命令符/本地路径/超长/非法字符）→ 拒绝执行；
+    ③ 执行失败按错误返回可纠正提示，不抛异常打断循环。
+    每次调用写一条本地审计（成功/拒绝/报错）。"""
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", None) or []
 
+    thread_id = ((config or {}).get("configurable") or {}).get("thread_id", "default")
     # 建立工具名 → 工具实例映射
     tool_map = {t.name: t for t in TOOLS}
     results = []
@@ -95,11 +101,13 @@ def _safe_tool_node(state: AgentState):
     for tc in tool_calls:
         name = tc.get("name", "")
         call_id = tc.get("id", "")
-        args = tc.get("args", {})
+        args = tc.get("args", {}) or {}
 
-        # 白名单校验：模型幻觉调用了不存在的工具
+        # ① 白名单校验：模型幻觉调用了不存在的工具
         if name not in TOOL_NAMES:
             available = "、".join(sorted(TOOL_NAMES))
+            log_event("tool_denied", tool=name, thread_id=thread_id, args=args,
+                      ok=False, error=f"工具名不存在：{name}")
             results.append(ToolMessage(
                 content=f"❌ 工具「{name}」不存在。可用工具：{available}。"
                         f"请从上面选择正确的工具名重试，不要编造工具。",
@@ -107,11 +115,27 @@ def _safe_tool_node(state: AgentState):
             ))
             continue
 
-        # 工具名合法，正常执行
+        # ② 参数级最小权限校验：工具名合法但参数越权，拒绝执行并让模型纠正
+        ok, reason = validate(name, args)
+        if not ok:
+            log_event("tool_denied", tool=name, thread_id=thread_id, args=args,
+                      ok=False, error=reason)
+            results.append(ToolMessage(
+                content=f"⛔ 工具「{name}」的参数被最小权限策略拒绝：{reason}。"
+                        f"请按要求修正参数后重试，不要尝试绕过限制。",
+                tool_call_id=call_id,
+            ))
+            continue
+
+        # 工具名合法、参数合法，正常执行
         try:
             result = tool_map[name].invoke(args)
+            log_event("tool_call", tool=name, thread_id=thread_id, args=args,
+                      ok=True, result_preview=str(result))
             results.append(ToolMessage(content=str(result), tool_call_id=call_id))
         except Exception as e:
+            log_event("tool_error", tool=name, thread_id=thread_id, args=args,
+                      ok=False, error=f"{e.__class__.__name__}: {e}")
             results.append(ToolMessage(
                 content=f"⚠️ 工具「{name}」执行失败：{e.__class__.__name__}: {e}。"
                         f"请检查参数后重试，或换用其他工具。",
