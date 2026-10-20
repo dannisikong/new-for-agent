@@ -18,6 +18,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from tools import TOOLS, TOOL_NAMES, TOOL_DESCRIPTIONS
 from tool_policy import validate
+from tool_errors import corrective_tool_message
 from audit_log import log_event
 from app import MockAlfredLLM
 from knowledge_retriever import EmbeddingClient, set_embedding_client
@@ -137,8 +138,7 @@ def _safe_tool_node(state: AgentState, config=None):
             log_event("tool_error", tool=name, thread_id=thread_id, args=args,
                       ok=False, error=f"{e.__class__.__name__}: {e}")
             results.append(ToolMessage(
-                content=f"⚠️ 工具「{name}」执行失败：{e.__class__.__name__}: {e}。"
-                        f"请检查参数后重试，或换用其他工具。",
+                content=corrective_tool_message(name, e),
                 tool_call_id=call_id,
             ))
 

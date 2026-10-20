@@ -32,6 +32,7 @@ from langgraph.types import interrupt
 from knowledge_retriever import hybrid_search
 from tools import web_search as _web_search_tool
 from tool_policy import validate as _validate_tool
+from tool_errors import corrective_tool_message
 from audit_log import log_event as _audit
 
 # 飞书多维表格日志配置
@@ -444,7 +445,7 @@ def build_rag_graph(model=None, human_review: bool = True):
             _audit("tool_call", tool="web_search", thread_id=thread_id,
                    args={"query": question}, ok=True, result_preview=result)
         except Exception as e:
-            result = f"（网络搜索失败：{e.__class__.__name__}）"
+            result = corrective_tool_message("web_search", e)
             _audit("tool_error", tool="web_search", thread_id=thread_id,
                    args={"query": question}, ok=False, error=f"{e.__class__.__name__}: {e}")
         trace = list(state["trace"]) + ["🌐 知识库未命中，转网络搜索"]
