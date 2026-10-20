@@ -9,3 +9,4 @@ jieba>=0.42
 numpy>=1.26
 requests>=2.31
 langgraph-checkpoint-sqlite>=2.0
+mcp>=1.0
