@@ -2,6 +2,28 @@
 
 > 记录 new-for-agent 项目每个阶段做了什么、为什么做、验证方式。最新在最前。
 
+## 2026-10-21 · P3.5 Agent 可观测性 trace 化
+
+### 背景
+对齐当日行业信号（Anthropic 为托管 Agent 出 OpenTelemetry traces、MCP 缺鉴权与可观测被反复点名）：现有 `audit_log.jsonl` 是离散事件，只有会话级 `thread_id`，缺"单次问答内各步串联"和耗时/成本。
+
+### 完成
+- **`audit_log.py` 升级**：`log_event` 新增可选字段 `trace_id / span / duration_ms / tokens / cost_usd`（全部默认 None，旧调用零改动向后兼容）；新增 `new_trace_id()` 生成 `tr-xxxxxxxx`、`read_trace(trace_id)` 拉一次 trace 的全部 span、`summarize_trace(trace_id)` 汇总总耗时/总成本/失败数。
+- **`agentic_rag.rag_query` 入口**：每次问答生成一个 `trace_id` 注入 `config.configurable`，自动透传给图内所有节点；`round` 审计带上 trace_id、span=`round`、duration_ms。
+- **`agentic_rag.web_search_node`** 与 **`agent_core._safe_tool_node`**：从 config 取 trace_id，用 `time.perf_counter()` 包工具调用计时，span 命名 `tool:<工具名>`，成功/拒绝/报错三类日志全部串上同一 trace。
+
+### 设计要点
+- 一次问答 = 一个 trace_id，内部每步是一个 span，对应"trace → span → 事件"标准可观测模型；不引入外部 trace 后端，先在本地 JSONL 落地，后续可平移到 LangSmith / OTel。
+- tokens/cost_usd 字段先预留，等模型侧用量上报接入即可填充，不阻塞当前链路。
+- 审计写失败依旧全静默吞掉，绝不影响主流程。
+
+### 验证
+- 向后兼容：不带 trace 的旧 `log_event` 调用正常落盘。
+- 新链路冒烟：`new_trace_id → log_event(tool/round) → read_trace → summarize_trace`，2 个 span 正确汇总 total_duration_ms=923.4、failed=0。
+- `audit_log.py / agent_core.py / agentic_rag.py` 编译通过，`import agent_core` 无报错。
+
+---
+
 ## 2026-10-18 · P2 工具报错可纠正化 + 收尾
 
 ### 本轮完成

@@ -8,6 +8,7 @@ agent_core.py —— 可复用后端核心（供 Streamlit Web UI 调用）
 命令行版（app.py）与本模块共用同一套工具与图结构。
 """
 
+import time
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AnyMessage, ToolMessage, HumanMessage
@@ -95,6 +96,7 @@ def _safe_tool_node(state: AgentState, config=None):
     tool_calls = getattr(last_msg, "tool_calls", None) or []
 
     thread_id = ((config or {}).get("configurable") or {}).get("thread_id", "default")
+    trace_id = ((config or {}).get("configurable") or {}).get("trace_id", "no-trace")
     # 建立工具名 → 工具实例映射
     tool_map = {t.name: t for t in TOOLS}
     results = []
@@ -107,8 +109,9 @@ def _safe_tool_node(state: AgentState, config=None):
         # ① 白名单校验：模型幻觉调用了不存在的工具
         if name not in TOOL_NAMES:
             available = "、".join(sorted(TOOL_NAMES))
-            log_event("tool_denied", tool=name, thread_id=thread_id, args=args,
-                      ok=False, error=f"工具名不存在：{name}")
+            log_event("tool_denied", tool=name, thread_id=thread_id, trace_id=trace_id,
+                      span=f"tool:{name}", args=args, ok=False,
+                      error=f"工具名不存在：{name}")
             results.append(ToolMessage(
                 content=f"❌ 工具「{name}」不存在。可用工具：{available}。"
                         f"请从上面选择正确的工具名重试，不要编造工具。",
@@ -119,8 +122,8 @@ def _safe_tool_node(state: AgentState, config=None):
         # ② 参数级最小权限校验：工具名合法但参数越权，拒绝执行并让模型纠正
         ok, reason = validate(name, args)
         if not ok:
-            log_event("tool_denied", tool=name, thread_id=thread_id, args=args,
-                      ok=False, error=reason)
+            log_event("tool_denied", tool=name, thread_id=thread_id, trace_id=trace_id,
+                      span=f"tool:{name}", args=args, ok=False, error=reason)
             results.append(ToolMessage(
                 content=f"⛔ 工具「{name}」的参数被最小权限策略拒绝：{reason}。"
                         f"请按要求修正参数后重试，不要尝试绕过限制。",
@@ -128,15 +131,19 @@ def _safe_tool_node(state: AgentState, config=None):
             ))
             continue
 
-        # 工具名合法、参数合法，正常执行
+        # 工具名合法、参数合法，正常执行（包计时，记 span 耗时）
         try:
+            _t0 = time.perf_counter()
             result = tool_map[name].invoke(args)
-            log_event("tool_call", tool=name, thread_id=thread_id, args=args,
-                      ok=True, result_preview=str(result))
+            duration_ms = (time.perf_counter() - _t0) * 1000
+            log_event("tool_call", tool=name, thread_id=thread_id, trace_id=trace_id,
+                      span=f"tool:{name}", duration_ms=duration_ms,
+                      args=args, ok=True, result_preview=str(result))
             results.append(ToolMessage(content=str(result), tool_call_id=call_id))
         except Exception as e:
-            log_event("tool_error", tool=name, thread_id=thread_id, args=args,
-                      ok=False, error=f"{e.__class__.__name__}: {e}")
+            log_event("tool_error", tool=name, thread_id=thread_id, trace_id=trace_id,
+                      span=f"tool:{name}", args=args, ok=False,
+                      error=f"{e.__class__.__name__}: {e}")
             results.append(ToolMessage(
                 content=corrective_tool_message(name, e),
                 tool_call_id=call_id,

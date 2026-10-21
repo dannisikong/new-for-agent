@@ -33,7 +33,7 @@ from knowledge_retriever import hybrid_search
 from tools import web_search as _web_search_tool
 from tool_policy import validate as _validate_tool
 from tool_errors import corrective_tool_message
-from audit_log import log_event as _audit
+from audit_log import log_event as _audit, new_trace_id
 
 # 飞书多维表格日志配置
 _LARK_BASE_TOKEN = "MqOEbCudzaX3BJse04wcY13qn5b"
@@ -433,20 +433,27 @@ def build_rag_graph(model=None, human_review: bool = True):
         """知识库未命中/不相关：降级走网络搜索，结果并入回答。
         调用前先过参数级最小权限校验，越权参数（命令/本地路径）直接拒绝。"""
         question = state["question"]
-        thread_id = ((config or {}).get("configurable") or {}).get("thread_id", "default")
+        _conf = (config or {}).get("configurable") or {}
+        thread_id = _conf.get("thread_id", "default")
+        trace_id = _conf.get("trace_id", "no-trace")
         ok, reason = _validate_tool("web_search", {"query": question})
         if not ok:
             _audit("tool_denied", tool="web_search", thread_id=thread_id,
+                   trace_id=trace_id, span="tool:web_search",
                    args={"query": question}, ok=False, error=reason)
             trace = list(state["trace"]) + [f"⛔ web_search 参数被最小权限策略拒绝：{reason}"]
             return {"web": [], "trace": trace}
         try:
+            _t0 = time.perf_counter()
             result = _web_search_tool.invoke({"query": question})
+            _ms = (time.perf_counter() - _t0) * 1000
             _audit("tool_call", tool="web_search", thread_id=thread_id,
+                   trace_id=trace_id, span="tool:web_search", duration_ms=_ms,
                    args={"query": question}, ok=True, result_preview=result)
         except Exception as e:
             result = corrective_tool_message("web_search", e)
             _audit("tool_error", tool="web_search", thread_id=thread_id,
+                   trace_id=trace_id, span="tool:web_search",
                    args={"query": question}, ok=False, error=f"{e.__class__.__name__}: {e}")
         trace = list(state["trace"]) + ["🌐 知识库未命中，转网络搜索"]
         return {"web": [result], "trace": trace}
@@ -564,6 +571,7 @@ def rag_query(question: str, model=None, use_cache: bool = True,
             }
     graph = build_rag_graph(model)
     _start = time.time()
+    trace_id = new_trace_id()
     out = graph.invoke(
         {
             "messages": [HumanMessage(content=question)],  # 本轮问题，reducer 自动 append
@@ -571,7 +579,7 @@ def rag_query(question: str, model=None, use_cache: bool = True,
             "retrieved": [], "web": [], "grade": "",
             "rewrites": 0, "trace": [],
         },
-        config={"configurable": {"thread_id": thread_id}},
+        config={"configurable": {"thread_id": thread_id, "trace_id": trace_id}},
     )
     _duration = int((time.time() - _start) * 1000)
 
@@ -600,6 +608,9 @@ def rag_query(question: str, model=None, use_cache: bool = True,
     _audit(
         "round",
         thread_id=thread_id,
+        trace_id=trace_id,
+        span="round",
+        duration_ms=_duration,
         ok=out.get("grade") != "blocked",
         extra={
             "question": question[:300],
@@ -607,7 +618,6 @@ def rag_query(question: str, model=None, use_cache: bool = True,
             "rewrites": out.get("rewrites", 0),
             "web_fallback": bool(out.get("web")),
             "doc_count": len(_docs),
-            "duration_ms": _duration,
             "cached": False,
         },
     )
