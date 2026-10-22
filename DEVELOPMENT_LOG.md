@@ -2,6 +2,29 @@
 
 > 记录 new-for-agent 项目每个阶段做了什么、为什么做、验证方式。最新在最前。
 
+## 2026-10-22 · 工具 docstring/schema 规范化（任务 #1）
+
+### 背景
+五个 `@tool` 的旧 docstring 是零散英文短句，模型选工具时拿不到"何时调用/何时不用"的边界；且参数说明只写在 docstring 里，LangChain 不会把它解析进字段级 schema。模型选错工具、把知识库问题拿去联网搜，根因之一就是工具描述不够清晰。
+
+### 完成
+- **五个工具统一改成三段式 docstring**：`何时调用（触发场景 + 边界排除）→ Args 入参含义/格式/禁止项 → Returns 返回格式`，语言以中文为主、保留关键英文术语，描述与后端真实返回逐一对齐（不写没实现的能力）。
+  - `guest_info_retriever`：4 位内置宾客档案，无匹配返回固定英文提示；
+  - `web_search`：只用于外部实时信息，课程概念优先 `knowledge_search`；联网失败返回的是"[模拟搜索结果]"降级文案，不得当事实；
+  - `weather_info`：明确是随机占位演示数据，不是实时预报；
+  - `hub_stats`：author 必须是 HF 用户名/组织名，非完整模型 ID；
+  - `knowledge_search`：课程范围内知识点优先用本工具，外部新闻走 `web_search`。
+- **字段级 schema 补描述**：参数改用 `Annotated[str, Field(description=...)]`，让参数说明进入 `args_schema.model_fields`，模型在 function calling 时同时看到工具描述与参数描述。
+- 纯文档/注解改动，未改任何工具执行逻辑、重试策略与权限校验。
+
+### 验证
+- `python3 -m py_compile tools.py` 通过；`import tools / agent_core / agentic_rag` 均无报错。
+- 五个字段 description 全部进入 schema（`f.description` 非空）；`TOOL_NAMES`、`TOOL_DESCRIPTIONS` 映射完整（5 个）。
+- 本地冒烟：`guest_info_retriever("Ada Lovelace")` 命中档案、`weather_info("Beijing")` 返回占位天气、`knowledge_search("什么是 MCP")` 命中文档片段（len 886）。
+- MCP stdio 自检 `mcp_client_check.py`：发现 `['knowledge_search','web_search']`，KB 真实召回；越权参数 `; cat /etc/passwd` 被最小权限策略拒绝；web_search 联网超时走既有降级，与本轮改动无关。
+
+---
+
 ## 2026-10-21 · P3.5 Agent 可观测性 trace 化
 
 ### 背景

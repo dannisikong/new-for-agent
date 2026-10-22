@@ -10,8 +10,9 @@ P0-1：工具调用重试幂等（只读工具，天然幂等；失败按错误�
 import random
 import time
 from functools import wraps
-from typing import Optional
+from typing import Annotated, Optional
 
+from pydantic import Field
 from langchain_core.tools import tool
 
 from retriever import retrieve_guest_info
@@ -71,11 +72,18 @@ def with_retry(max_attempts: int = 3):
 # ============================================================
 
 @tool
-def guest_info_retriever(query: str) -> str:
-    """Retrieves detailed information about gala guests based on their name or relation.
+def guest_info_retriever(query: Annotated[str, Field(description="宾客姓名或关系关键词，纯文本，不含路径或命令")]) -> str:
+    """检索舞会宾客档案，返回对应宾客的身份、与主人的关系、简介和邮箱。
+
+    何时调用：用户询问某位宾客是谁、与主人什么关系、有什么背景或邮箱时使用；
+    仅覆盖内置的 4 位历史宾客档案，超出范围不要强行匹配。
 
     Args:
-        query: The name or relation of the guest you want information about.
+        query: 宾客姓名或与宾客相关的关系关键词，纯文本；不要带文件路径、URL 或 shell 命令。
+
+    Returns:
+        格式化多行文本，依次为 Name / Relation / Description / Email 四行；
+        无匹配时返回 "No matching guest information found."。
     """
     return retrieve_guest_info(query)
 
@@ -98,11 +106,18 @@ def _duckduckgo_search_real(query: str) -> str:
 
 @tool
 @with_retry(3)
-def web_search(query: str) -> str:
-    """Searches the web for the latest news and information.
+def web_search(query: Annotated[str, Field(description="联网搜索关键词短语，不含本地路径或 shell 命令")]) -> str:
+    """联网检索最新资讯与外部事实，返回最多 3 条标题加摘要的编号列表。
+
+    何时调用：问题需要外部实时信息（新闻、最新进展、外部事实）而本地知识库查不到时使用；
+    概念定义、课程知识点优先调用 knowledge_search，不要在两个工具间重复发起。
 
     Args:
-        query: The search query (e.g. a news topic or recent advancement).
+        query: 搜索关键词短语（一句话或核心词组均可），不要传本地文件路径或 shell 命令，长度不超过 300 字。
+
+    Returns:
+        以 "- 标题: 摘要" 逐行列出的搜索结果文本；联网彻底失败时返回标注为"[模拟搜索结果]"的降级文案，
+        此时必须提示用户以官方信源为准，不得把模拟结果当作事实。
     """
     try:
         return _duckduckgo_search_real(query)
@@ -119,11 +134,17 @@ def web_search(query: str) -> str:
 # ============================================================
 
 @tool
-def weather_info(location: str) -> str:
-    """Fetches dummy weather information for a given location.
+def weather_info(location: Annotated[str, Field(description="城市或地点名称，中英文文字，不含命令符或路径")]) -> str:
+    """查询指定城市或地点的示例天气（演示用占位数据，不是实时气象预报）。
+
+    何时调用：用户询问某个地点的天气状况时使用；返回的是随机占位演示数据，不能当作真实天气预报引用。
 
     Args:
-        location: The location to get weather information for.
+        location: 城市或地点名称（中英文均可），仅文字、数字与常见空格连字符，不要带命令符或路径，长度不超过 100 字。
+
+    Returns:
+        一行形如 "Weather in {location}: {condition}, {temp_c}°C" 的文本，
+        天气条件在 Rainy / Clear / Windy 三者中随机选取。
     """
     weather_conditions = [
         {"condition": "Rainy", "temp_c": 15},
@@ -150,11 +171,18 @@ def _hub_stats_real(author: str) -> str:
 
 @tool
 @with_retry(3)
-def hub_stats(author: str) -> str:
-    """Fetches the most downloaded model from a specific author on the Hugging Face Hub.
+def hub_stats(author: Annotated[str, Field(description="HF Hub 用户名或组织名，字母/数字/下划线/连字符，非完整模型 ID")]) -> str:
+    """查询 Hugging Face Hub 上指定作者或组织下载量最高的模型及其下载量。
+
+    何时调用：用户询问某 HF 用户或机构（如 google、facebook、qwen）最热门的模型时使用；
+    作者名必须是 HF Hub 上的用户名或组织名，不要填完整模型 ID 或自然语言句子。
 
     Args:
-        author: The username of the model author/organization to find models from.
+        author: HF Hub 用户名或组织名，仅允许字母、数字、下划线、连字符，长度不超过 64 字符。
+
+    Returns:
+        一句说明"下载量最高的模型是 {model_id}，下载量 {count}"；真实查询失败时用内置示例数据兜底，
+        无匹配作者时返回 "No models found for author {author}."。
     """
     try:
         return _hub_stats_real(author)
@@ -176,14 +204,19 @@ def hub_stats(author: str) -> str:
 # ============================================================
 
 @tool
-def knowledge_search(query: str) -> str:
-    """Searches the AI Agent course knowledge base (22 Chinese study notes) and returns the most relevant snippets.
+def knowledge_search(query: Annotated[str, Field(description="知识点或问题，中文提问效果最佳，不含命令或路径")]) -> str:
+    """检索内置 AI Agent 课程知识库（MCP、LangGraph、RAG、LLM、框架等中文学习笔记），返回最相关的文档片段。
 
-    Use this tool when the user asks about AI Agent concepts, LangGraph, LLMs, RAG,
-    tools, frameworks (smolagents / LlamaIndex / LangGraph), or any topic covered by the course.
+    何时调用：用户询问 Agent 概念、LangGraph、LLM、RAG、工具调用、框架
+    （smolagents / LlamaIndex / LangGraph）等课程范围内知识点时优先使用；
+    外部实时新闻、最新进展不要用本工具，改用 web_search。
 
     Args:
-        query: The knowledge point or question to search (in Chinese works best).
+        query: 想了解的知识点或问题，中文提问检索效果最好；纯文本，不要带命令或路径，长度不超过 300 字。
+
+    Returns:
+        多条"【文档】标题（章节 + 相关度分数）+ 正文片段"列表，开头标注召回方式
+        （BM25 关键词 / BM25 + 向量语义 RRF 融合 / 附带 LLM Rerank 精排）；未命中时返回换一种问法的提示。
     """
     return _kb_search(query)
 
