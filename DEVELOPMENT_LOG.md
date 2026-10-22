@@ -2,6 +2,23 @@
 
 > 记录 new-for-agent 项目每个阶段做了什么、为什么做、验证方式。最新在最前。
 
+## 2026-10-22 · 修复演示模式 ReAct 死循环（任务 #6 本地验证）
+
+### 背景
+推进 #6 Streamlit 本地验证时，headless 起服务后脚本化跑演示模式 ReAct 图，提问直接挂起（40s 超时被终止）。最小复现定位：`_safe_tool_node` 构造 `ToolMessage` 时只传 `content` 与 `tool_call_id`，没回传 `name`；`MockAlfredLLM` 靠 `m.name` 集合判断工具是否已调用，结果 `called` 全为 `None`，每轮都以为工具没调过 → 无限 ReAct 循环。真实 LLM 不依赖 `ToolMessage.name` 做判断，所以线上真实模式未暴露，仅演示模式必现。
+
+### 完成
+- `agent_core._safe_tool_node` 三条 `ToolMessage`（白名单拒绝、参数级拒绝、正常执行）统一补 `name=name`，让消息历史能被模型/规则正确识别归属工具。
+- 未改图结构、工具执行逻辑、权限校验与审计字段。
+
+### 验证
+- ReAct 单工具「Tell me about Ada Lovelace」5 条消息正常收尾，返回宾客档案；多工具「Dr. Nikola Tesla + recent advancements」两轮 `guest_info_retriever → web_search` 后收尾，`web_search` 超时走既有模拟降级文案，不挂死。
+- RAG 演示模式 `build_rag_graph(None)` 3 步轨迹正常输出；全模块编译、`import` 链无报错。
+- headless `streamlit run app_web.py`：`/healthz` 与首页均 200，启动日志无 traceback；MCP stdio 自检枚举 `['knowledge_search','web_search']`，KB 真实召回，越权参数被拦截。
+- 受限项：线上实例 https://new-for-agent.streamlit.app/ 的浏览器真实点选不在本环境能力内（本地无 GUI、Streamlit Cloud 无 lark-cli），部署后需用户在页面复测单工具/多工具/知识库三类问题。
+
+---
+
 ## 2026-10-22 · HTTP/embedding client 单例复用（任务 #4）
 
 ### 背景

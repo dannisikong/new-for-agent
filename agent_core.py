@@ -150,6 +150,7 @@ def _safe_tool_node(state: AgentState, config=None):
                 content=f"❌ 工具「{name}」不存在。可用工具：{available}。"
                         f"请从上面选择正确的工具名重试，不要编造工具。",
                 tool_call_id=call_id,
+                name=name,
             ))
             continue
 
@@ -162,6 +163,7 @@ def _safe_tool_node(state: AgentState, config=None):
                 content=f"⛔ 工具「{name}」的参数被最小权限策略拒绝：{reason}。"
                         f"请按要求修正参数后重试，不要尝试绕过限制。",
                 tool_call_id=call_id,
+                name=name,
             ))
             continue
 
@@ -173,7 +175,7 @@ def _safe_tool_node(state: AgentState, config=None):
             log_event("tool_call", tool=name, thread_id=thread_id, trace_id=trace_id,
                       span=f"tool:{name}", duration_ms=duration_ms,
                       args=args, ok=True, result_preview=str(result))
-            results.append(ToolMessage(content=str(result), tool_call_id=call_id))
+            results.append(ToolMessage(content=str(result), tool_call_id=call_id, name=name))
         except Exception as e:
             log_event("tool_error", tool=name, thread_id=thread_id, trace_id=trace_id,
                       span=f"tool:{name}", args=args, ok=False,
