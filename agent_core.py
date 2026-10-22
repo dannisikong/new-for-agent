@@ -60,21 +60,55 @@ class WebLLM(Runnable):
         return self.llm.invoke(messages, config=config)
 
 
+# ============================================================
+# 客户端缓存：相同 provider/api_key/model/base_url 复用同一个 LLM 实例，
+# 底层 OpenAI/HF 连接池随之复用；embedding 配置未变化时不重置 client、
+# 不清空已建好的向量索引，避免每次问答重复建连与重建索引（P3 单例复用）。
+# ============================================================
+_llm_cache: dict[tuple, Runnable] = {}
+# 上次生效的 embedding 配置指纹：(base_url, emb_model, api_key)，None 表示纯 BM25
+_last_emb_key: tuple | None = None
+
+
+def _embedding_config(provider: str, api_key: str, base_url: str | None) -> tuple | None:
+    """返回 OpenAI 兼容提供商的 embedding 配置指纹；其余提供商返回 None（纯 BM25）。"""
+    if provider != "OpenAI 兼容":
+        return None
+    base = (base_url or "").lower()
+    emb_model = "text-embedding-v3" if "dashscope" in base else "text-embedding-3-small"
+    return (base_url or "https://api.openai.com/v1", emb_model, api_key)
+
+
 def make_llm(provider: str, api_key: str, model_name: str,
              base_url: str | None = None) -> Runnable:
     """统一入口：演示模式返回 MockAlfredLLM，其余返回 WebLLM。
-    同时按提供商注入 embedding 配置（OpenAI 兼容 → 开启向量召回；其余 → 纯 BM25）。"""
+    同时按提供商注入 embedding 配置（OpenAI 兼容 → 开启向量召回；其余 → 纯 BM25）。
+    相同配置直接复用已缓存的客户端，不重复建立连接。"""
+    global _last_emb_key
+
+    cache_key = (provider, api_key, model_name, base_url or "")
+    if cache_key in _llm_cache:
+        return _llm_cache[cache_key]
+
     if provider == "演示模式（无需 Token）":
         set_embedding_client(None)
-        return MockAlfredLLM()
-    llm = WebLLM(provider, api_key, model_name, base_url)
-    if provider == "OpenAI 兼容":
-        # DashScope 用其兼容端点的 embedding 模型；其他 OpenAI 兼容端点用默认 embedding
-        base = (base_url or "").lower()
-        emb_model = "text-embedding-v3" if "dashscope" in base else "text-embedding-3-small"
-        set_embedding_client(EmbeddingClient(api_key, base_url or "https://api.openai.com/v1", emb_model))
-    else:  # Hugging Face 暂不配置 embedding，自动降级纯 BM25
-        set_embedding_client(None)
+        _last_emb_key = None
+        llm = MockAlfredLLM()
+    else:
+        llm = WebLLM(provider, api_key, model_name, base_url)
+        emb_cfg = _embedding_config(provider, api_key, base_url)
+        if emb_cfg is None:
+            set_embedding_client(None)
+            _last_emb_key = None
+        elif emb_cfg != _last_emb_key:
+            # 只有配置真正变化时才重建 embedding client 并清空旧向量索引
+            set_embedding_client(
+                EmbeddingClient(api_key, base_url or "https://api.openai.com/v1", emb_cfg[1])
+            )
+            _last_emb_key = emb_cfg
+        # embedding 配置未变：保留既有 client 与已建向量索引，不重复初始化
+
+    _llm_cache[cache_key] = llm
     return llm
 
 

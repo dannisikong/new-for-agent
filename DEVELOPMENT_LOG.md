@@ -2,6 +2,26 @@
 
 > 记录 new-for-agent 项目每个阶段做了什么、为什么做、验证方式。最新在最前。
 
+## 2026-10-22 · HTTP/embedding client 单例复用（任务 #4）
+
+### 背景
+Streamlit 每次脚本重跑（每次提问、人在回路 resume）都调 `make_llm(...)`，旧实现每次新建 `ChatOpenAI / ChatHuggingFace` 与 `EmbeddingClient`，底层 TCP/TLS 连接不复用；且每次都 `set_embedding_client(new)` 会把全局 `_vector_index` 置空，导致下一轮检索重复重建向量索引。查询答案已有 LRU 缓存，底层连接与索引这一层还是反复初始化。
+
+### 完成
+- **`knowledge_retriever.EmbeddingClient` 连接池化**：实例内持有一个 `requests.Session()`，Authorization 在 session 头里设置一次，`embed()` 复用同一连接池，跨多次向量请求不重复建连；接口签名与返回格式不变。
+- **`agent_core.make_llm` 配置级缓存**：以 `(provider, api_key, model_name, base_url)` 为 key 缓存已构造的 Runnable，同配置直接复用，底层 OpenAI/HF 客户端连接池随之复用；配置变更（换 Key/模型/Base URL）才缓存未命中、新建实例。
+- **embedding 配置去重置**：记录上次生效的 embedding 指纹 `(base_url, emb_model, api_key)`，配置未变化时保留既有 client 与已建向量索引，不再重复 `set_embedding_client` 清空索引；配置变化或切到纯 BM25 提供商时才重建/置空。
+- 图编译（`build_rag_graph / build_react_graph`）保持每次新建：checkpointer 是全局共享单例，图对象轻量，本轮不做图缓存，避免过度工程。
+
+### 验证
+- `python3 -m py_compile` 全部模块通过；`import tools / agent_core / agentic_rag / knowledge_retriever / app / app_web` 无报错。
+- 单例断言：演示模式两次 `make_llm` 返回同一实例；OpenAI 兼容同配置复用 LLM 与 embedding client；换 Key 后新 LLM 实例、embedding client 重建；回退演示模式 embedding 正确置空。
+- `EmbeddingClient` 持有 `requests.Session`，鉴权头已注入，base_url / model 取值正确。
+- RAG 演示模式端到端冒烟：召回正常、3 步轨迹、重复提问 LRU 缓存命中；MCP stdio 自检枚举 `['knowledge_search','web_search']`，KB 真实召回，越权参数被拦截，web_search 超时走既有降级。
+- 备注：Hugging Face 分支依赖 `langchain-huggingface`（已在 requirements.txt），本运行环境未安装该包，属既有环境限制，非本轮回归。
+
+---
+
 ## 2026-10-22 · 工具 docstring/schema 规范化（任务 #1）
 
 ### 背景

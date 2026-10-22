@@ -153,18 +153,23 @@ class BM25Index:
 # ============================================================
 
 class EmbeddingClient:
-    """OpenAI 兼容 embedding 接口：POST {base_url}/embeddings"""
+    """OpenAI 兼容 embedding 接口：POST {base_url}/embeddings。
+
+    实例持有一个 requests.Session，跨多次 embed 复用 TCP/TLS 连接池，
+    避免每次请求都新建连接（P3 单例/连接复用）。
+    """
 
     def __init__(self, api_key: str, base_url: str, model: str = "text-embedding-3-small"):
+        import requests
         self.api_key = api_key
         self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         self.model = model
+        self._session = requests.Session()
+        self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        import requests
-        resp = requests.post(
+        resp = self._session.post(
             f"{self.base_url}/embeddings",
-            headers={"Authorization": f"Bearer {self.api_key}"},
             json={"model": self.model, "input": texts},
             timeout=30,
         )
