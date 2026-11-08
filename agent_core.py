@@ -9,6 +9,7 @@ agent_core.py —— 可复用后端核心（供 Streamlit Web UI 调用）
 """
 
 import time
+from collections import Counter
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AnyMessage, ToolMessage, HumanMessage
@@ -116,6 +117,38 @@ def make_llm(provider: str, api_key: str, model_name: str,
 # 参数化 ReAct 循环图（与 app.py 同构，模型可替换）
 # ============================================================
 
+# ============================================================
+# Watchdog：ReAct 死循环检测（借鉴 DeepSeek Super-agent 的 Watchdog 思想）
+# 不监控进程存活，而监控"模型是否陷入无效循环或重复调用同一工具"
+# ============================================================
+MAX_TOOL_CALLS = 8      # 整轮最多工具调用次数，超过强制收尾
+REPEAT_WINDOW = 5       # 重复检测窗口：最近 N 次工具调用
+REPEAT_LIMIT = 3       # 窗口内同一工具名出现 N 次视为重复
+
+
+def _detect_loop(messages: list, pending_calls: list) -> str | None:
+    """检测 ReAct 死循环。
+    返回 None 表示正常可执行；返回 str 表示应注入的强制收尾提示。
+    两类异常：
+    1. 总工具调用次数超过上限 → 强制收尾
+    2. 最近窗口内同一工具名重复出现 → 强制收尾
+    """
+    tool_msgs = [m for m in messages if isinstance(m, ToolMessage)]
+    total = len(tool_msgs) + len(pending_calls)
+    if total > MAX_TOOL_CALLS:
+        return (f"⚠️ Watchdog：已达最大工具调用次数（{MAX_TOOL_CALLS}）。"
+                f"请基于已有信息直接给出最终回答，不要再调用任何工具。")
+    recent_names = [getattr(m, "name", "") for m in tool_msgs[-REPEAT_WINDOW:]]
+    recent_names += [tc.get("name", "") for tc in pending_calls]
+    pending_names = {tc.get("name", "") for tc in pending_calls}
+    counts = Counter(recent_names)
+    for name, cnt in counts.items():
+        if cnt >= REPEAT_LIMIT and name in pending_names:
+            return (f"⚠️ Watchdog：最近 {REPEAT_WINDOW} 次调用中「{name}」重复 {cnt} 次，"
+                    f"可能陷入循环。请基于已有信息直接回答，或换一个不同的工具/参数。")
+    return None
+
+
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
@@ -134,6 +167,17 @@ def _safe_tool_node(state: AgentState, config=None):
     # 建立工具名 → 工具实例映射
     tool_map = {t.name: t for t in TOOLS}
     results = []
+
+    # Watchdog：死循环检测（总步数 / 重复调用），命中则不执行工具、直接注入强制收尾提示
+    loop_warn = _detect_loop(state["messages"], tool_calls)
+    if loop_warn:
+        log_event("watchdog_break", tool="loop", thread_id=thread_id, trace_id=trace_id,
+                  span="watchdog", args={"pending": len(tool_calls)}, ok=False,
+                  error="ReAct loop detected")
+        return {"messages": [
+            ToolMessage(content=loop_warn, tool_call_id=tc.get("id", ""), name=tc.get("name", ""))
+            for tc in tool_calls
+        ]}
 
     for tc in tool_calls:
         name = tc.get("name", "")

@@ -83,6 +83,7 @@ except ImportError:
 
 MAX_REWRITES = 2
 TOP_K = 3
+_FAST_PATH_COVERAGE = 0.15  # Fast Path：实词覆盖率低于此值直接判不相关，跳过 LLM 评分
 
 # 查询缓存：规范化问题 → {answer, trace, hits}
 # LRU 淘汰：容量上限 100 条，超过淘汰最久未访问的，避免内存无限增长
@@ -416,6 +417,21 @@ def build_rag_graph(model=None, human_review: bool = True):
     def grade(state: RAGState):
         question = state["question"]
         docs = state["retrieved"]
+        # Fast Path（借鉴 DeepSeek Super-agent 两级过滤）：
+        # 程序层先算实词覆盖率，极低则明显不相关，直接跳过 LLM 评分
+        q_tokens = {t for t in jieba.lcut(question) if len(t.strip()) > 1 and t not in _GRADE_STOP}
+        quick_hit = 0.0
+        if q_tokens:
+            for d in docs:
+                doc_text = d["text"] + " " + d["doc_title"] + " " + d["section"]
+                doc_tokens = set(jieba.lcut(doc_text))
+                quick_hit = max(quick_hit, len(q_tokens & doc_tokens) / len(q_tokens))
+        if quick_hit < _FAST_PATH_COVERAGE:
+            trace = list(state["trace"]) + [
+                f"⚡ Fast Path：实词覆盖率 {quick_hit:.2f} < {_FAST_PATH_COVERAGE}，程序层直接判不相关"
+            ]
+            return {"grade": "not_relevant", "trace": trace}
+        # Slow Path：程序层判可能相关，交 LLM 精判（真实模式）或规则判定（演示模式）
         g = _llm_grade(model, question, docs) if use_llm else _rule_grade(question, docs)
         trace = list(state["trace"]) + [
             f"⚖️ 评分：{len(docs)} 个片段 → 「{'相关' if g == 'relevant' else '不相关'}」"
