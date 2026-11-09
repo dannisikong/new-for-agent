@@ -2,6 +2,47 @@
 
 > 记录 new-for-agent 项目每个阶段做了什么、为什么做、验证方式。最新在最前。
 
+## 2026-11-08 · Watchdog 死循环检测 + RAG Fast Path 两级评分
+
+### 背景
+借鉴 DeepSeek Super-agent 架构（44 号笔记）里的 Watchdog 外部控制回路和 Fast Path/Slow Path 两级过滤思想，在学习项目里实践最小版本。ReAct 图此前只有步数自然终止，模型一旦陷入重复工具调用就会无限循环；RAG 评分节点每次都调 LLM，即使检索结果明显不相关也不例外。
+
+### 完成
+- **`agent_core.py` 新增 Watchdog 死循环检测**：
+  - 新增 `_detect_loop()` 函数，两类异常：总工具调用超过 `MAX_TOOL_CALLS=8` 次强制收尾；最近 `REPEAT_WINDOW=5` 次窗口内同一工具名出现 `REPEAT_LIMIT=3` 次判定循环。
+  - 命中后**不执行工具**，直接返回一条强制收尾提示（"请基于已有信息直接回答，不要再调用工具"），让 assistant 下一轮停止调工具。
+  - 审计日志新增 `watchdog_break` 事件，记录 span=watchdog、pending 工具数、ok=False。
+- **`agentic_rag.py` 新增 Fast Path 两级评分**：
+  - grade 节点先跑程序层实词覆盖率计算（复用 jieba 分词 + 停用词表），覆盖率 < `_FAST_PATH_COVERAGE=0.15` 直接判 `not_relevant`，**跳过 LLM grade**。
+  - 覆盖率 ≥0.15 才走 Slow Path 交 LLM 精判（真实模式）或规则判定（演示模式）。
+  - 设计原则"宁可误放不可误杀"：只有覆盖率极低的明显不相关场景才 Fast Path 拦截，其余都交 LLM 判，避免误杀相关文档。
+
+### 验证
+- 编译/导入通过；ReAct 演示模式 4 步正常收尾；RAG 演示模式 3 步（检索→评分→回答）正常。
+- Watchdog 单元测试 4 case：正常调用放行 / 重复 guest_info ×3 拦截 / 超步数 9+1=10 拦截 / 边界 7+1=8 放行，全通过。
+- Fast Path 边界验证："什么是 RAG？"覆盖率 ≥0.15 走 Slow Path 不误杀；"今天股票市场怎么样？"覆盖率在 0.15-0.4 之间也走 Slow Path 交 LLM 判，行为正确。
+- commit `46c2be1`，代码单独提交不混笔记。
+
+---
+
+## 2026-11-08 · 笔记归档 43–45 + README 专业化
+
+### 背景
+持续推进学习笔记线（本地 docs/ → 飞书知识库 → GitHub 三重交付），同时把 README 从课程作业风格改成面试可用的专业项目描述。
+
+### 完成
+- **43 号笔记**：面试八股速查（分布式限流 / 布隆过滤器 / MySQL / LangGraph Reducer 与多 Agent / 链表哈希），结合本项目实践整理。
+- **44 号笔记**：DeepSeek Super-agent 架构探索（双层 Router-Worker / 事件驱动 / 存算分离 / Watchdog 外部控制回路）。
+- **45 号笔记**：FDE 前沿部署工程师（Palantir 模式 / Builds-Embeds-Owns 三动词 / 深层剥离法 / 中国实践数据）。
+- **README 更新**：补全 MCP Server / 可观测性 trace / 评测体系 / Rerank / 工具报错可纠正化等文件描述；docs 数量从 22 篇更新到 45 篇；去除"宾客检索""邮件分拣"等 demo 措辞，改为"样本查询""条件分支图示例"等专业表述；删掉"代码中的邮箱、宾客信息均为示例数据"那句。
+
+### 验证
+- 每篇笔记：本地写 `docs/NN-*.md` → 飞书 `wiki +node-create` → `docs +update --command append` → `docs +fetch --scope keyword` 回读关键词全命中 → git 单独 commit 推送。
+- tracked docs 从 42 篇增长到 45 篇。
+- commits：`b5446af`（43）→ `4215f6c`（44）→ `b541509`（45）→ `6f47111`（README 更新）→ `911fd38`（README 专业化）。
+
+---
+
 ## 2026-10-22 · 修复演示模式 ReAct 死循环（任务 #6 本地验证）
 
 ### 背景
