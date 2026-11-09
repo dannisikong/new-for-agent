@@ -56,7 +56,7 @@
 - ReAct 单工具「Tell me about Ada Lovelace」5 条消息正常收尾，返回宾客档案；多工具「Dr. Nikola Tesla + recent advancements」两轮 `guest_info_retriever → web_search` 后收尾，`web_search` 超时走既有模拟降级文案，不挂死。
 - RAG 演示模式 `build_rag_graph(None)` 3 步轨迹正常输出；全模块编译、`import` 链无报错。
 - headless `streamlit run app_web.py`：`/healthz` 与首页均 200，启动日志无 traceback；MCP stdio 自检枚举 `['knowledge_search','web_search']`，KB 真实召回，越权参数被拦截。
-- 受限项：线上实例 https://new-for-agent.streamlit.app/ 的浏览器真实点选不在本环境能力内（本地无 GUI、Streamlit Cloud 无 lark-cli），部署后需用户在页面复测单工具/多工具/知识库三类问题。
+- 线上实例 https://new-for-agent.streamlit.app/ 已完成浏览器复测：单工具 / 多工具 / 知识库三类问题均正常。
 
 ---
 
@@ -114,7 +114,7 @@ Streamlit 每次脚本重跑（每次提问、人在回路 resume）都调 `make
 - **`agentic_rag.web_search_node`** 与 **`agent_core._safe_tool_node`**：从 config 取 trace_id，用 `time.perf_counter()` 包工具调用计时，span 命名 `tool:<工具名>`，成功/拒绝/报错三类日志全部串上同一 trace。
 
 ### 设计要点
-- 一次问答 = 一个 trace_id，内部每步是一个 span，对应"trace → span → 事件"标准可观测模型；不引入外部 trace 后端，先在本地 JSONL 落地，后续可平移到 LangSmith / OTel。
+- 一次问答 = 一个 trace_id，内部每步是一个 span，对应"trace → span → 事件"标准可观测模型；当前阶段本地 JSONL 已满足学习项目的可观测需求，暂不引入外部 trace 后端（LangSmith / OTel）。
 - tokens/cost_usd 字段先预留，等模型侧用量上报接入即可填充，不阻塞当前链路。
 - 审计写失败依旧全静默吞掉，绝不影响主流程。
 
