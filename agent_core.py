@@ -21,6 +21,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from tools import TOOLS, TOOL_NAMES, TOOL_DESCRIPTIONS
 from tool_policy import validate
 from tool_errors import corrective_tool_message
+from prompt_injection import detect_injection, wrap_with_warning
 from audit_log import log_event
 from app import MockAlfredLLM
 from knowledge_retriever import EmbeddingClient, set_embedding_client
@@ -219,7 +220,15 @@ def _safe_tool_node(state: AgentState, config=None):
             log_event("tool_call", tool=name, thread_id=thread_id, trace_id=trace_id,
                       span=f"tool:{name}", duration_ms=duration_ms,
                       args=args, ok=True, result_preview=str(result))
-            results.append(ToolMessage(content=str(result), tool_call_id=call_id, name=name))
+            # Prompt 注入检测：工具返回内容可能被外部数据劫持
+            result_text = str(result)
+            injection_hits = detect_injection(result_text)
+            if injection_hits:
+                log_event("injection_detected", tool=name, thread_id=thread_id, trace_id=trace_id,
+                          span=f"tool:{name}", args=args, ok=True,
+                          result_preview=f"hits={injection_hits[:3]}")
+                result_text = wrap_with_warning(result_text, injection_hits)
+            results.append(ToolMessage(content=result_text, tool_call_id=call_id, name=name))
         except Exception as e:
             log_event("tool_error", tool=name, thread_id=thread_id, trace_id=trace_id,
                       span=f"tool:{name}", args=args, ok=False,
