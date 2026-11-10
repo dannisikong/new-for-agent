@@ -177,8 +177,75 @@ class EmbeddingClient:
         return [d["embedding"] for d in resp.json()["data"]]
 
 
+class ChromaVectorStore:
+    """Chroma 持久化向量库：替代内存 numpy 索引，文档只 embedding 一次。
+
+    - 持久化目录：./chroma_db/
+    - collection 名 = embedding 模型名（不同模型不同 collection，避免维度冲突）
+    - 首次启动时把所有 chunk embedding 入库；后续启动检查 chunk 数，不一致则重建
+    - 检索时直接从 Chroma ANN 查询，不重建内存矩阵
+    """
+
+    def __init__(self, chunks: list[dict], client: EmbeddingClient, persist_dir: str = None):
+        import chromadb
+        self.chunks = chunks
+        self.client = client
+        model_tag = client.model.replace("/", "_").replace("-", "_")
+        collection_name = f"kb_{model_tag}"
+        persist_dir = persist_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
+        os.makedirs(persist_dir, exist_ok=True)
+
+        self._chroma = chromadb.PersistentClient(path=persist_dir)
+        # 使用 Chroma 默认 embedding（我们自己传 embedding，不依赖它的 embedding function）
+        self._col = self._chroma.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+
+        # 检查是否需要重建：当前 Chroma 里的 chunk 数和实际 chunk 数不一致
+        existing_count = self._col.count()
+        expected_count = len(chunks)
+        if existing_count != expected_count:
+            if existing_count > 0:
+                self._chroma.delete_collection(collection_name)
+                self._col = self._chroma.get_or_create_collection(
+                    name=collection_name, metadata={"hnsw:space": "cosine"})
+            self._ingest(chunks)
+
+    def _ingest(self, chunks: list[dict]):
+        """把所有 chunk embedding 写入 Chroma"""
+        texts = [c["text"][:800] for c in chunks]
+        ids = [f"chunk_{i}" for i in range(len(chunks))]
+        metadatas = [{"doc_title": c["doc_title"], "section": c["section"]} for c in chunks]
+        # 分批 embedding
+        for i in range(0, len(texts), 64):
+            batch_texts = texts[i:i+64]
+            batch_embeds = self.client.embed(batch_texts)
+            self._col.add(
+                ids=ids[i:i+64],
+                embeddings=batch_embeds,
+                documents=batch_texts,
+                metadatas=metadatas[i:i+64],
+            )
+        print(f"  [chroma] 已入库 {len(chunks)} 个片段（{self._col.count()} 条向量）")
+
+    def search_raw(self, query: str, top_n: int = RECALL_N) -> list[tuple[float, int]]:
+        q_embed = self.client.embed([query])[0]
+        res = self._col.query(
+            query_embeddings=[q_embed],
+            n_results=top_n,
+        )
+        results = []
+        for i, doc_id in enumerate(res["ids"][0]):
+            idx = int(doc_id.replace("chunk_", ""))
+            distance = res["distances"][0][i]
+            score = 1.0 - distance  # cosine 距离 → 相似度（越大越相关）
+            results.append((score, idx))
+        return results
+
+
 class VectorIndex:
-    """内存向量索引：L2 归一化后点积即余弦相似度（语料量小，无需外部向量库）"""
+    """内存向量索引（降级方案：Chroma 不可用时用）。L2 归一化后点积即余弦相似度。"""
 
     def __init__(self, chunks: list[dict], client: EmbeddingClient):
         self.chunks = chunks
@@ -215,7 +282,7 @@ def _rrf_fuse(*ranked_lists: list[tuple[float, int]], top_k: int = TOP_K) -> lis
 
 _index: BM25Index | None = None
 _embedding_client: EmbeddingClient | None = None
-_vector_index: VectorIndex | None = None
+_vector_index = None  # ChromaVectorStore 或 VectorIndex（内存降级）
 
 
 def _get_index() -> BM25Index:
@@ -232,17 +299,24 @@ def set_embedding_client(client: EmbeddingClient | None):
     _vector_index = None  # 配置变了，下次检索时重建向量索引
 
 
-def _get_vector_index() -> VectorIndex | None:
+def _get_vector_index():
+    """优先用 Chroma 持久化向量库；Chroma 不可用时降级回内存 numpy 索引。"""
     global _vector_index, _embedding_client
     if _embedding_client is None:
         return None
     if _vector_index is None:
+        # 先试 Chroma
         try:
-            _vector_index = VectorIndex(_get_index().chunks, _embedding_client)
-        except Exception as e:  # embedding 不可用 → 永久降级纯 BM25（本次会话）
-            print(f"  [vector] 向量索引不可用，降级纯 BM25：{e.__class__.__name__}: {e}")
-            _embedding_client = None
-            return None
+            _vector_index = ChromaVectorStore(_get_index().chunks, _embedding_client)
+            print(f"  [chroma] 使用持久化向量库（{_vector_index._col.count()} 条向量）")
+        except Exception as e:
+            print(f"  [chroma] Chroma 初始化失败，降级内存索引：{e.__class__.__name__}: {e}")
+            try:
+                _vector_index = VectorIndex(_get_index().chunks, _embedding_client)
+            except Exception as e2:
+                print(f"  [vector] 向量索引不可用，降级纯 BM25：{e2.__class__.__name__}: {e2}")
+                _embedding_client = None
+                return None
     return _vector_index
 
 
